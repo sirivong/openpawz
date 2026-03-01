@@ -70,6 +70,7 @@ let _clipboard: { nodes: FlowNode[]; edges: FlowEdge[] } | null = null;
 let _mounted = false;
 let _executor: FlowExecutorController | null = null;
 let _reporter: FlowChatReporterController | null = null;
+let _sidebarTab: 'flows' | 'templates' = 'flows';
 
 // Undo/redo stack — one per active graph
 const _undoStacks: Map<string, UndoStack> = new Map();
@@ -171,7 +172,6 @@ function initModules() {
     togglePanel,
     toggleList,
     toggleAgent: () => toggleFlowAgent(),
-    toggleTemplates: () => toggleTemplates(),
   });
 }
 
@@ -342,7 +342,6 @@ function mount() {
     if (action === 'toggle-panel') togglePanel();
     else if (action === 'toggle-list') toggleList();
     else if (action === 'toggle-agent') toggleFlowAgent();
-    else if (action === 'toggle-templates') toggleTemplates();
   }) as EventListener);
 
   // Edge-tab expand buttons (appear when panels are collapsed)
@@ -350,10 +349,6 @@ function mount() {
   const edgeTabRight = el('flows-edge-tab-right');
   if (edgeTabLeft) edgeTabLeft.addEventListener('click', () => toggleList());
   if (edgeTabRight) edgeTabRight.addEventListener('click', () => togglePanel());
-
-  // Templates panel close button
-  const tplClose = el('flows-templates-close');
-  if (tplClose) tplClose.addEventListener('click', () => toggleTemplates());
 
   // Keyboard shortcuts
   document.addEventListener('keydown', onKeyDown);
@@ -401,24 +396,6 @@ function toggleList() {
   localStorage.setItem('paw-flows-list-collapsed', String(isCollapsed));
 }
 
-/** Toggle the templates panel. */
-function toggleTemplates() {
-  const view = el('flows-view');
-  if (!view) return;
-  const isOpen = view.classList.toggle('flows-templates-open');
-  localStorage.setItem('paw-flows-templates-open', String(isOpen));
-  if (isOpen) updateTemplatesPanel();
-}
-
-/** Render the templates browser into the templates panel. */
-function updateTemplatesPanel() {
-  const container = el('flows-templates-content');
-  if (!container) return;
-  renderTemplateBrowser(container, FLOW_TEMPLATES, (tpl: FlowTemplate) => {
-    instantiateFromTemplate(tpl);
-  });
-}
-
 /** Restore panel/list collapsed states from localStorage. */
 function restorePanelStates() {
   const view = el('flows-view');
@@ -432,11 +409,6 @@ function restorePanelStates() {
     view.classList.add('flows-list-collapsed');
   } else {
     view.classList.add('flows-list-shown');
-  }
-  if (localStorage.getItem('paw-flows-templates-open') === 'true') {
-    view.classList.add('flows-templates-open');
-    // Render templates content after DOM is ready
-    requestAnimationFrame(() => updateTemplatesPanel());
   }
 }
 
@@ -473,46 +445,66 @@ function updateFlowList() {
   // Update hero stats
   updateHeroStats();
 
-  container.innerHTML = '<div class="flow-sidebar-content"></div>';
+  // Render tab switcher
+  const tabHtml = `<div class="flow-sidebar-tabs">
+    <button class="flow-sidebar-tab${_sidebarTab === 'flows' ? ' active' : ''}" data-tab="flows">Flows</button>
+    <button class="flow-sidebar-tab${_sidebarTab === 'templates' ? ' active' : ''}" data-tab="templates">Templates</button>
+  </div>`;
+
+  container.innerHTML = `${tabHtml}<div class="flow-sidebar-content"></div>`;
+
+  // Wire tab clicks
+  container.querySelectorAll('.flow-sidebar-tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      _sidebarTab = (btn as HTMLElement).dataset.tab as 'flows' | 'templates';
+      updateFlowList();
+    });
+  });
 
   const content = container.querySelector('.flow-sidebar-content') as HTMLElement;
   if (!content) return;
 
-  renderFlowList(
-    content,
-    _graphs,
-    _activeGraphId,
-    (id) => {
-      _activeGraphId = id;
-      _selectedNodeId = null;
-      renderActiveGraph();
-      updateFlowList();
-    },
-    (id) => {
-      _graphs = _graphs.filter((g) => g.id !== id);
-      if (_activeGraphId === id) {
-        _activeGraphId = _graphs[0]?.id ?? null;
+  if (_sidebarTab === 'templates') {
+    renderTemplateBrowser(content, FLOW_TEMPLATES, (tpl: FlowTemplate) => {
+      instantiateFromTemplate(tpl);
+    });
+  } else {
+    renderFlowList(
+      content,
+      _graphs,
+      _activeGraphId,
+      (id) => {
+        _activeGraphId = id;
         _selectedNodeId = null;
-      }
-      persist();
-      deleteFromBackend(id);
-      renderActiveGraph();
-      updateFlowList();
-    },
-    () => {
-      newFlow();
-    },
-    // Move flow to folder
-    (flowId, folder) => {
-      const g = _graphs.find((gg) => gg.id === flowId);
-      if (g) {
-        g.folder = folder || undefined;
-        g.updatedAt = new Date().toISOString();
-        persist();
+        renderActiveGraph();
         updateFlowList();
-      }
-    },
-  );
+      },
+      (id) => {
+        _graphs = _graphs.filter((g) => g.id !== id);
+        if (_activeGraphId === id) {
+          _activeGraphId = _graphs[0]?.id ?? null;
+          _selectedNodeId = null;
+        }
+        persist();
+        deleteFromBackend(id);
+        renderActiveGraph();
+        updateFlowList();
+      },
+      () => {
+        newFlow();
+      },
+      // Move flow to folder
+      (flowId, folder) => {
+        const g = _graphs.find((gg) => gg.id === flowId);
+        if (g) {
+          g.folder = folder || undefined;
+          g.updatedAt = new Date().toISOString();
+          persist();
+          updateFlowList();
+        }
+      },
+    );
+  }
 }
 
 function updateNodePanel() {
@@ -564,6 +556,7 @@ function instantiateFromTemplate(tpl: FlowTemplate) {
   _graphs.push(graph);
   _activeGraphId = graph.id;
   _selectedNodeId = null;
+  _sidebarTab = 'flows';
   persist();
   renderActiveGraph();
   updateFlowList();
