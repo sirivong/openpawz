@@ -64,7 +64,7 @@ pub use graph::{
 };
 pub use hybrid_search::resolve_hybrid_weight;
 pub use intent_classifier::{classify_intent, intent_weights};
-pub use memory_bus::MemoryBus;
+pub use memory_bus::{AgentCapability, MemoryBus};
 pub use meta_cognition::{
     assess_query_confidence, build_reflection_prompt, rebuild_confidence_map,
 };

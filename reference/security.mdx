@@ -238,19 +238,29 @@ Project Engram adds **field-level PII encryption** for memory content. Unlike cr
 
 ### PII detection
 
-Before storage, every memory passes through a PII scanner with 9 regex patterns:
+Before storage, every memory passes through a two-layer PII scanner with 17 regex patterns:
 
-| Pattern | Example |
-|---------|---------|
-| Email addresses | `user@example.com` |
-| Phone numbers | `+1-555-0123` |
-| Social Security numbers | `123-45-6789` |
-| Credit card numbers | `4111-1111-1111-1111` |
-| IP addresses | `192.168.1.1` |
-| Dates of birth | `1990-01-15` |
-| Passport numbers | `AB1234567` |
-| Driver's license | State-specific patterns |
-| Bank account / routing | `0123456789` |
+| # | Pattern | Example | Tier |
+|---|---------|---------|------|
+| 1 | Social Security Numbers | `123-45-6789`, `123456789` | Confidential |
+| 2 | Credit card numbers | `4111-1111-1111-1111` | Confidential |
+| 3 | Email addresses | `user@example.com` | Sensitive |
+| 4 | Phone numbers | `+1-555-0123` | Sensitive |
+| 5 | International phone numbers | `+44 20 7946 0958` | Sensitive |
+| 6 | Physical addresses | Street address patterns | Sensitive |
+| 7 | Person names | `Mr./Mrs./Dr.` prefixed names | Sensitive |
+| 8 | Geographic locations | City/state/country patterns | Sensitive |
+| 9 | Government IDs | Passport, driver's license | Confidential |
+| 10 | JWT tokens | `eyJhbGciOi...` (header.payload.signature) | Confidential |
+| 11 | AWS access keys | `AKIA...` (20-char key IDs) | Confidential |
+| 12 | Private keys (RSA/EC/DSA) | `-----BEGIN ... PRIVATE KEY-----` | Confidential |
+| 13 | IBAN | `GB82 WEST 1234 5698 7654 32` | Confidential |
+| 14 | IPv4 addresses | `192.168.1.1` | Sensitive |
+| 15 | Generic API keys | `sk-`, `api_key=`, Bearer tokens | Confidential |
+| 16 | Credentials (passwords) | `password=`, `secret=` patterns | Confidential |
+| 17 | Dates of birth | `1990-01-15` | Sensitive |
+
+**Layer 2 (planned):** LLM-assisted secondary scan for context-dependent PII that static regex cannot catch.
 
 ### Encryption details
 
@@ -265,14 +275,14 @@ Before storage, every memory passes through a PII scanner with 9 regex patterns:
 
 ### Query sanitization
 
-All search queries are sanitized before reaching SQLite FTS5 to prevent injection:
-- FTS5 operators (`AND`, `OR`, `NOT`, `NEAR`, `*`, `"`, `(`, `)`) are stripped
+All search queries are sanitized before reaching the storage backend to prevent injection:
+- Search operators (`AND`, `OR`, `NOT`, `NEAR`, `*`, `"`, `(`, `)`) are stripped
 - Column filter syntax (`:`) is removed
 - Empty queries after sanitization are rejected
 
 ### Prompt injection scanning
 
-Memory content is scanned against 10 known prompt injection patterns before storage. Matches are flagged and can be rejected based on agent policy. This prevents poisoned memories from manipulating agent behavior on future recalls.
+Memory content is scanned against 10 known prompt injection patterns before storage. Matches are **redacted** with `[REDACTED:injection]` markers, preventing poisoned memories from manipulating agent behavior on future recalls.
 
 ### GDPR Article 17 — Right to erasure
 
@@ -280,10 +290,52 @@ The `gdpr_purge` command performs a complete data erasure for a user:
 
 1. All memory content rows deleted
 2. All vector embeddings deleted
-3. FTS5 index entries removed
+3. Search index entries removed
 4. Graph edges removed
 5. Padding table repacked to prevent file-size leakage
 6. `PRAGMA secure_delete` ensures freed pages are zeroed
+
+## Inter-agent memory bus trust
+
+The cross-agent memory bus (pub/sub for sharing memories between agents) enforces publish-side authentication to prevent memory poisoning.
+
+### Capability tokens
+
+Each agent holds an `AgentCapability` signed with HMAC-SHA256 against a platform-held secret key. The token specifies:
+- **Max publication scope** — Agent, Squad, or Global
+- **Importance ceiling** — Maximum importance an agent can assert (0.0–1.0)
+- **Write permission** — Whether the agent can publish at all
+- **Rate limit** — Maximum publications per GC window
+
+Every `publish()` call verifies the token signature in constant time before any bus operation.
+
+### Publish-side defenses
+
+| Defense | Detail |
+|---------|--------|
+| **Scope enforcement** | Publication scope clamped to agent's maximum — cannot publish beyond assigned authority |
+| **Importance ceiling** | Publication importance clamped to agent's ceiling — prevents low-trust agents from asserting high-confidence facts |
+| **Per-agent rate limiting** | Publish count tracked per GC window — exceeding limit returns `MemoryBusRateLimit` error |
+| **Injection scanning** | All publication content scanned for prompt injection patterns before entering the bus |
+
+### Trust-weighted contradiction resolution
+
+When two agents publish contradictory facts on the same topic, the system resolves based on trust-weighted importance:
+
+```
+effective_importance = raw_importance × agent_trust_score
+```
+
+The memory with the higher effective importance is retained. Trust scores are per-agent (0.0–1.0) and adjustable at runtime. This prevents a compromised low-trust agent from overwriting facts established by high-trust agents.
+
+### Threat model
+
+| Attack | Mitigation |
+|--------|------------|
+| Agent floods bus with poisoned memories | Rate limit + injection scan on publish side |
+| Low-trust agent overwrites high-trust facts | Trust-weighted contradiction resolution |
+| Agent publishes beyond its authority scope | Scope ceiling enforcement |
+| Forged capability token | HMAC-SHA256 verification against platform secret |
 
 ## Anti-forensic vault-size quantization
 

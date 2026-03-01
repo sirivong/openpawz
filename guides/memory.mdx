@@ -21,7 +21,7 @@ flowchart TD
     subgraph LTM["Long-Term Memory Graph"]
         direction LR
         G["Episodic Store\n(what happened)"]
-        H["Semantic Store\n(what is true)"]
+        H["Knowledge Store\n(what is true)"]
         I["Procedural Store\n(how to do things)"]
     end
     F --- J["Graph Edges (8 types)\nSpreading Activation"]
@@ -32,7 +32,7 @@ flowchart TD
 |------|---------|------|
 | **Sensory Buffer** | Iconic/echoic memory | Ring buffer holding raw tokens; discarded after each turn |
 | **Working Memory** | Short-term memory | Priority-evicted slots feeding the context window |
-| **Long-Term Memory** | Declarative + procedural memory | Persistent SQLite graph with episodic, semantic, and procedural stores |
+| **Long-Term Memory** | Declarative + procedural memory | Persistent graph with episodic, knowledge, and procedural stores |
 
 ### How it works
 
@@ -91,7 +91,7 @@ Memory retrieval uses a three-signal hybrid algorithm fused with Reciprocal Rank
 ```mermaid actions={false}
 flowchart LR
     Q["Search Query"] --> CL["Query Classifier"]
-    CL --> BM["BM25\n(SQLite FTS5)"]
+    CL --> BM["BM25\n(full-text search)"]
     CL --> VS["Vector Similarity\n(Ollama embeddings)"]
     BM --> RRF["Reciprocal Rank\nFusion"]
     VS --> RRF
@@ -100,12 +100,12 @@ flowchart LR
     RR --> R["Ranked Results"]
 ```
 
-1. **BM25** — text relevance via SQLite FTS5 with porter stemming
+1. **BM25** — text relevance via full-text search with porter stemming
 2. **Vector cosine similarity** — semantic meaning via Ollama embeddings
 3. **Graph spreading activation** — 1-hop traversal of typed memory edges to find related memories
 4. **RRF fusion** — merges all three signals without requiring score normalization
 5. **Reranking** — configurable strategy: RRF, MMR (maximal marginal relevance), or combined
-6. **Keyword fallback** — when both BM25 and vector search return no results, the engine falls back to a keyword search using SQL `LIKE` on memory content. This ensures memories can always be found even when embeddings are unavailable or the FTS index misses a match.
+6. **Keyword fallback** — when both BM25 and vector search return no results, the engine falls back to a keyword search using SQL `LIKE` on memory content. This ensures memories can always be found even when embeddings are unavailable or the full-text index misses a match.
 
 :::tip Keyword fallback
 The keyword fallback is automatic — you don't need to configure anything. If semantic search and BM25 both return empty results for a query, Pawz transparently retries with a simple substring match so you never get a false "no results found."
@@ -250,15 +250,16 @@ Memory in Pawz is protected at multiple levels:
 
 | Layer | Protection |
 |-------|-----------|
-| **PII encryption** | Memory content containing PII is automatically detected (9 regex patterns) and encrypted with AES-256-GCM before storage. Encryption key stored in OS keychain (`paw-memory-vault`). |
+| **PII encryption** | Two-layer PII defense: 17 regex patterns (emails, SSNs, credit cards, JWTs, AWS keys, private keys, IBAN, etc.) detect and encrypt sensitive content with AES-256-GCM before storage. Encryption key stored in OS keychain (`paw-memory-vault`). |
 | **At rest** | Sensitive database fields encrypted with AES-256-GCM, key stored in OS keychain |
 | **In transit** | TLS certificate-pinned connections to embedding providers (Mozilla root CAs only, OS trust store excluded) |
 | **In RAM** | Provider API keys wrapped in `Zeroizing<String>` — automatically zeroed from memory on drop |
 | **Outbound** | Every embedding request SHA-256 signed and logged to a 500-entry audit ring buffer |
-| **Query sanitization** | All FTS5 query operators stripped before execution to prevent SQL injection |
-| **Prompt injection** | 10-pattern scanner blocks known prompt injection attempts in memory content |
+| **Query sanitization** | All search query operators stripped before execution to prevent injection |
+| **Prompt injection** | 10-pattern scanner redacts prompt injection attempts in memory content with `[REDACTED:injection]` markers |
+| **Inter-agent trust** | Memory bus enforces capability tokens (HMAC-SHA256 signed), scope/importance ceilings, per-agent rate limits, and trust-weighted contradiction resolution |
 | **Anti-forensic** | Database padded to 512KB boundaries; two-phase secure delete prevents plaintext recovery |
-| **GDPR compliance** | Article 17 purge command deletes all memories, embeddings, FTS index, and graph edges for a user |
+| **GDPR compliance** | Article 17 purge command deletes all memories, embeddings, search index, and graph edges for a user |
 
 :::info PII auto-encryption
 Unlike the previous memory system which stored content unencrypted, Engram automatically scans memory content for PII patterns (emails, phone numbers, SSNs, credit cards, etc.) and encrypts matching content with field-level AES-256-GCM before writing to SQLite. Decryption happens transparently on retrieval.

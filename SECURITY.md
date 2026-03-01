@@ -183,32 +183,49 @@ The following hardening measures were applied as part of a systematic enterprise
 
 ## Engram Memory Security
 
-The Engram memory subsystem applies defense-in-depth to all stored agent memories (episodic, semantic, and procedural). This protects user data even if an attacker gains access to the SQLite database file.
+The Engram memory subsystem applies defense-in-depth to all stored agent memories (episodic, knowledge, and procedural). This protects user data even if an attacker gains access to the SQLite database file.
 
 ### Field-Level Encryption
 
 Memories containing personally identifiable information (PII) are automatically encrypted before storage using **AES-256-GCM** with a dedicated keychain key (`paw-memory-vault`), separate from the credential vault key.
 
-**Automatic PII detection** scans memory content for 9 pattern types before storage:
-- Social Security Numbers, credit card numbers, phone numbers
-- Email addresses, physical addresses
-- Person names, geographic locations
-- Credentials (passwords, API keys, tokens)
-- Government IDs
+**Automatic PII detection** uses a two-layer defense scanning memory content for 17 pattern types before storage:
+
+| # | Pattern | Example | Tier |
+|---|---------|---------|------|
+| 1 | Social Security Numbers | `123-45-6789`, `123456789` | Confidential |
+| 2 | Credit card numbers | `4111-1111-1111-1111` | Confidential |
+| 3 | Email addresses | `user@example.com` | Sensitive |
+| 4 | Phone numbers | `+1-555-0123` | Sensitive |
+| 5 | International phone numbers | `+44 20 7946 0958` | Sensitive |
+| 6 | Physical addresses | Street address patterns | Sensitive |
+| 7 | Person names | `Mr./Mrs./Dr.` prefixed names | Sensitive |
+| 8 | Geographic locations | City/state/country patterns | Sensitive |
+| 9 | Government IDs | Passport, driver's license | Confidential |
+| 10 | JWT tokens | `eyJhbGciOi...` (header.payload.signature) | Confidential |
+| 11 | AWS access keys | `AKIA...` (20-char key IDs) | Confidential |
+| 12 | Private keys (RSA/EC/DSA) | `-----BEGIN ... PRIVATE KEY-----` | Confidential |
+| 13 | IBAN | `GB82 WEST 1234 5698 7654 32` | Confidential |
+| 14 | IPv4 addresses | `192.168.1.1` | Sensitive |
+| 15 | Generic API keys | `sk-`, `api_key=`, Bearer tokens | Confidential |
+| 16 | Credentials (passwords) | `password=`, `secret=` patterns | Confidential |
+| 17 | Dates of birth | `1990-01-15` | Sensitive |
+
+**Layer 2 (planned):** LLM-assisted secondary scan for context-dependent PII that static regex cannot catch (e.g., "my mother's maiden name is Smith").
 
 **Three security tiers:**
 
 | Tier | Content | Treatment |
-|------|---------|-----------|
+|------|---------|-----------||
 | **Cleartext** | No PII detected | Stored as-is |
-| **Sensitive** | PII detected (email, name, phone) | AES-256-GCM encrypted, `enc:` prefix |
-| **Confidential** | High-sensitivity PII (SSN, credit card, credentials) | AES-256-GCM encrypted, `enc:` prefix |
+| **Sensitive** | PII detected (email, name, phone, IP) | AES-256-GCM encrypted, `enc:` prefix |
+| **Confidential** | High-sensitivity PII (SSN, credit card, JWT, AWS key, private key) | AES-256-GCM encrypted, `enc:` prefix |
 
 Encrypted content uses the format `enc:<base64(nonce ‖ ciphertext ‖ tag)>`. A fresh 96-bit nonce is generated per encryption. Decryption is automatic on retrieval.
 
 ### Query Sanitization
 
-- **FTS5 injection prevention** — All user-supplied search queries are sanitized before reaching SQLite's full-text search engine. FTS5 operators (`AND`, `OR`, `NOT`, `NEAR`, `*`, `"`, `{`, `}`, `^`) are stripped or escaped.
+- **Parameterized query sanitization** — All user-supplied search queries are sanitized before reaching the storage backend. Search operators (`AND`, `OR`, `NOT`, `NEAR`, `*`, `"`, `{`, `}`, `^`) are stripped or escaped to prevent query injection.
 - **Input validation** — Memory content is capped at 256 KB. Null bytes are rejected. Category strings are validated against the 18-variant enum with graceful fallback to `general`.
 
 ### Prompt Injection Scanning
@@ -220,7 +237,7 @@ Recalled memories are scanned for 10 prompt injection patterns before being retu
 - Instruction injection (`new instruction`, `from now on`)
 - Delimiter attacks and encoding bypass attempts
 
-Suspicious memories are flagged in logs with redacted previews.
+Suspicious content is **redacted** with `[REDACTED:injection]` markers before storage to prevent poisoned memories from manipulating agent behavior on future recalls.
 
 ### Log Redaction
 
@@ -229,11 +246,34 @@ Memory content in log output is automatically redacted:
 - Log previews are truncated to 80 characters
 - Full content never appears in log files
 
+### Inter-Agent Memory Bus Trust
+
+The cross-agent memory bus (pub/sub system for sharing memories between agents) enforces publish-side authentication to prevent memory poisoning attacks:
+
+| Defense | Implementation |
+|---------|----------------|
+| **Capability tokens** | Each agent holds an `AgentCapability` with HMAC-SHA256 signature — specifies max publication scope, importance ceiling, rate limit, and write permission |
+| **Signature verification** | Every publish call requires a valid capability token; HMAC is verified in constant time (`subtle` crate) before any bus operation |
+| **Scope enforcement** | Agents cannot publish beyond their assigned scope (e.g., an agent scoped to `Agent` cannot publish to `Global`) |
+| **Importance ceiling** | Publication importance is clamped to the agent's maximum — prevents low-trust agents from asserting high-confidence facts |
+| **Per-agent rate limiting** | Publish count tracked per GC window; agents exceeding their rate limit are rejected |
+| **Publish-side injection scan** | All publication content is scanned for prompt injection patterns before entering the bus |
+| **Trust-weighted contradiction resolution** | When two agents publish contradictory facts, the memory with the higher trust-weighted importance wins. Trust scores are per-agent and adjustable. |
+
+**Threat model:**
+
+| Attack | Mitigation |
+|--------|------------|
+| Compromised agent floods bus with poisoned memories | Rate limit + injection scan on publish side |
+| Low-trust agent overwrites high-trust facts | Trust-weighted contradiction resolution — lower trust score reduces effective importance |
+| Agent publishes beyond its authority scope | Scope ceiling enforcement — publish rejected if scope exceeds capability |
+| Forged capability token | HMAC-SHA256 verification against platform-held secret key |
+
 ### GDPR Right to Erasure
 
 Article 17 compliance via the `engine_memory_purge_user` Tauri command:
 - Accepts a list of user identifiers (names, emails, usernames)
-- Securely erases all matching records across episodic, semantic, and procedural memory tables
+- Securely erases all matching records across episodic, knowledge, and procedural memory tables
 - Purges working memory snapshots and audit log entries
 - Two-phase deletion: content zeroed before row deletion
 - Returns a count of erased records for compliance reporting
