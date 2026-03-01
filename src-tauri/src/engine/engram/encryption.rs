@@ -5,12 +5,15 @@
 // a different OS keychain entry ("paw-memory-vault" / "field-encryption-key").
 //
 // Three security tiers:
-//   - Cleartext: stored as-is (fast FTS5), e.g. "User prefers dark mode"
-//   - Sensitive: AES-encrypted content + cleartext summary for FTS5
-//   - Confidential: fully encrypted, vector-only search (no FTS5 summary)
+//   - Cleartext: stored as-is (fast full-text search), e.g. "User prefers dark mode"
+//   - Sensitive: AES-encrypted content + cleartext summary for search
+//   - Confidential: fully encrypted, vector-only search (no cleartext summary)
 //
-// PII auto-detection runs regex patterns on every memory before storage
-// to automatically classify sensitivity tier.
+// Two-layer PII detection:
+//   Layer 1 — 17 static regex patterns run on every memory before storage
+//             to automatically classify sensitivity tier.
+//   Layer 2 — (planned) LLM-assisted secondary scan during consolidation
+//             for context-dependent PII that regex cannot catch.
 
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
@@ -30,10 +33,10 @@ use crate::atoms::error::{EngineError, EngineResult};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum MemorySecurityTier {
-    /// Stored as plaintext within the encrypted DB — fast FTS5 search.
+    /// Stored as plaintext within the encrypted DB — fast full-text search.
     #[default]
     Cleartext,
-    /// Content encrypted with AES-256-GCM. Cleartext summary kept for FTS5.
+    /// Content encrypted with AES-256-GCM. Cleartext summary kept for search.
     Sensitive,
     /// Fully encrypted, no cleartext summary. Only vector search works.
     Confidential,
@@ -77,6 +80,9 @@ pub enum PiiType {
     Phone,
     Address,
     GovernmentId,
+    HealthData,
+    FinancialAccount,
+    IPAddress,
 }
 
 impl std::fmt::Display for PiiType {
@@ -91,6 +97,9 @@ impl std::fmt::Display for PiiType {
             Self::Phone => write!(f, "phone"),
             Self::Address => write!(f, "address"),
             Self::GovernmentId => write!(f, "government_id"),
+            Self::HealthData => write!(f, "health_data"),
+            Self::FinancialAccount => write!(f, "financial_account"),
+            Self::IPAddress => write!(f, "ip_address"),
         }
     }
 }
@@ -170,6 +179,55 @@ static PII_PATTERNS: LazyLock<Vec<PiiPattern>> = LazyLock::new(|| {
         (
             r"(?i)(passport|driver.?licen[sc]e|national.?id)\s*(number|#|no)?\s*(is|=|:)\s*",
             PiiType::GovernmentId,
+            MemorySecurityTier::Confidential,
+        ),
+        // ── NEW patterns (§43.5 Phase 1) ────────────────────────────────
+        // JWT tokens (header.payload.signature)
+        (
+            r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+",
+            PiiType::Credential,
+            MemorySecurityTier::Confidential,
+        ),
+        // AWS access keys (AKIA prefix + 16 alphanumeric)
+        (
+            r"\bAKIA[0-9A-Z]{16}\b",
+            PiiType::Credential,
+            MemorySecurityTier::Confidential,
+        ),
+        // Private key blocks (RSA, EC, DSA)
+        (
+            r"-----BEGIN\s+(RSA\s+|EC\s+|DSA\s+)?PRIVATE KEY-----",
+            PiiType::Credential,
+            MemorySecurityTier::Confidential,
+        ),
+        // IBAN (international bank account number)
+        (
+            r"\b[A-Z]{2}\d{2}\s?[A-Z0-9]{4}(\s?\d{4}){2,7}\s?\d{1,4}\b",
+            PiiType::FinancialAccount,
+            MemorySecurityTier::Confidential,
+        ),
+        // IPv4 addresses
+        (
+            r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
+            PiiType::IPAddress,
+            MemorySecurityTier::Sensitive,
+        ),
+        // International phone numbers (+XX prefix)
+        (
+            r"\+\d{1,3}[\s.-]?\(?\d{1,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b",
+            PiiType::Phone,
+            MemorySecurityTier::Sensitive,
+        ),
+        // Generic API key patterns (long hex/base64 after key-like prefix)
+        (
+            r"(?i)(api[_-]?key|secret[_-]?key|access[_-]?token)\s*[:=]\s*[A-Za-z0-9+/=_-]{32,}",
+            PiiType::Credential,
+            MemorySecurityTier::Confidential,
+        ),
+        // SSN without hyphens (9 consecutive digits after SSN-like context)
+        (
+            r"(?i)ssn\s*[:=]?\s*\d{9}\b",
+            PiiType::SSN,
             MemorySecurityTier::Confidential,
         ),
     ];
@@ -358,7 +416,7 @@ pub struct EncryptedContent {
 /// Classify and optionally encrypt memory content before storage.
 ///
 /// - Cleartext: returned as-is
-/// - Sensitive: content encrypted, a short summary kept in cleartext for FTS5
+/// - Sensitive: content encrypted, a short summary kept in cleartext for search
 /// - Confidential: content encrypted, NO cleartext summary (vector-search only)
 pub fn prepare_for_storage(content: &str, key: &[u8]) -> EngineResult<EncryptedContent> {
     let detection = detect_pii(content);
@@ -395,7 +453,7 @@ pub fn prepare_for_storage(content: &str, key: &[u8]) -> EngineResult<EncryptedC
 }
 
 /// Generate a safe summary that describes the memory without exposing PII.
-/// Used for FTS5 indexing of Sensitive-tier memories.
+/// Used for full-text indexing of Sensitive-tier memories.
 fn generate_safe_summary(content: &str, pii_types: &[PiiType]) -> String {
     let type_desc: Vec<String> = pii_types.iter().map(|t| format!("{}", t)).collect();
     let types_str = if type_desc.is_empty() {
@@ -711,6 +769,92 @@ mod tests {
         assert!(detection.has_pii);
         assert!(detection.detected_types.contains(&PiiType::CreditCard));
         assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    // ── New pattern tests (§43.5 Phase 1) ────────────────────────────────
+
+    #[test]
+    fn test_pii_detection_jwt() {
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U";
+        let detection = detect_pii(jwt);
+        assert!(detection.has_pii, "JWT should be detected as PII");
+        assert!(detection.detected_types.contains(&PiiType::Credential));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    #[test]
+    fn test_pii_detection_aws_key() {
+        let detection = detect_pii("My key is AKIAIOSFODNN7EXAMPLE");
+        assert!(detection.has_pii, "AWS key should be detected as PII");
+        assert!(detection.detected_types.contains(&PiiType::Credential));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    #[test]
+    fn test_pii_detection_private_key() {
+        let detection = detect_pii("-----BEGIN RSA PRIVATE KEY-----\nMIIEpAI...");
+        assert!(detection.has_pii, "Private key should be detected as PII");
+        assert!(detection.detected_types.contains(&PiiType::Credential));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    #[test]
+    fn test_pii_detection_iban() {
+        let detection = detect_pii("Wire to GB29 NWBK 6016 1331 9268 19");
+        assert!(detection.has_pii, "IBAN should be detected as PII");
+        assert!(detection
+            .detected_types
+            .contains(&PiiType::FinancialAccount));
+    }
+
+    #[test]
+    fn test_pii_detection_ipv4() {
+        let detection = detect_pii("Server at 192.168.1.100");
+        assert!(detection.has_pii, "IPv4 should be detected as PII");
+        assert!(detection.detected_types.contains(&PiiType::IPAddress));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Sensitive);
+    }
+
+    #[test]
+    fn test_pii_detection_intl_phone() {
+        let detection = detect_pii("Call me at +44 20 7946 0958");
+        assert!(
+            detection.has_pii,
+            "International phone should be detected as PII"
+        );
+        assert!(detection.detected_types.contains(&PiiType::Phone));
+    }
+
+    #[test]
+    fn test_pii_detection_api_key_pattern() {
+        let detection = detect_pii("api_key=sk_test_FAKE000000000000000000000000");
+        assert!(
+            detection.has_pii,
+            "API key pattern should be detected as PII"
+        );
+        assert!(detection.detected_types.contains(&PiiType::Credential));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    #[test]
+    fn test_pii_detection_ssn_no_hyphens() {
+        let detection = detect_pii("SSN: 123456789");
+        assert!(
+            detection.has_pii,
+            "SSN without hyphens should be detected as PII"
+        );
+        assert!(detection.detected_types.contains(&PiiType::SSN));
+        assert_eq!(detection.recommended_tier, MemorySecurityTier::Confidential);
+    }
+
+    #[test]
+    fn test_pii_detection_ec_private_key() {
+        let detection = detect_pii("-----BEGIN EC PRIVATE KEY-----\nMHQCAQEE...");
+        assert!(
+            detection.has_pii,
+            "EC private key should be detected as PII"
+        );
+        assert!(detection.detected_types.contains(&PiiType::Credential));
     }
 
     #[test]
