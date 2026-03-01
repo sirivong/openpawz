@@ -21,7 +21,7 @@
 
 /* Agent panel open — split canvas row into canvas + agent */
 .flows-view.active.flows-agent-open {
-  grid-template-rows: auto auto 1fr 260px;
+  grid-template-rows: auto auto 1fr 320px;
   grid-template-areas:
     "hero   hero   hero"
     "list   toolbar panel"
@@ -38,7 +38,7 @@
     "list   canvas";
 }
 .flows-view.active.flows-panel-collapsed.flows-agent-open {
-  grid-template-rows: auto auto 1fr 260px;
+  grid-template-rows: auto auto 1fr 320px;
   grid-template-areas:
     "hero   hero"
     "list   toolbar"
@@ -58,7 +58,7 @@
     "canvas  panel";
 }
 .flows-view.active.flows-list-collapsed.flows-agent-open {
-  grid-template-rows: auto auto 1fr 260px;
+  grid-template-rows: auto auto 1fr 320px;
   grid-template-areas:
     "hero   hero"
     "toolbar panel"
@@ -78,7 +78,7 @@
     "canvas";
 }
 .flows-view.active.flows-panel-collapsed.flows-list-collapsed.flows-agent-open {
-  grid-template-rows: auto auto 1fr 260px;
+  grid-template-rows: auto auto 1fr 320px;
   grid-template-areas:
     "hero"
     "toolbar"
