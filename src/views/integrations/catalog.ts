@@ -131,20 +131,29 @@ const CURATED: ServiceDefinition[] = [
     [
       {
         key: 'oauth',
-        label: 'Google Account',
+        label: 'n8n Credential Name',
         type: 'text',
-        placeholder: 'Sign in with Google',
+        placeholder: 'e.g. My Gmail Account',
         required: true,
+        helpText: 'The name you gave your Gmail credential in n8n (step 4 above).',
       },
     ],
     {
       title: 'Connect Gmail',
       steps: [
-        { instruction: 'Click "Connect" to sign in with your Google account' },
-        { instruction: 'Grant OpenPawz permission to read and send emails' },
-        { instruction: 'Select which labels to sync (optional)', tip: 'You can change this later' },
+        {
+          instruction: 'Open your n8n instance and go to Credentials',
+          link: 'http://localhost:5678/home/credentials',
+          tip: 'If n8n is on a different port, adjust the URL accordingly',
+        },
+        { instruction: 'Click "Add Credential", search for "Gmail", and select it' },
+        {
+          instruction: 'Click "Sign in with Google" in n8n\'s credential form and authorize access',
+        },
+        { instruction: 'Name the credential (e.g. "My Gmail Account") and click Save' },
+        { instruction: 'Paste that same credential name below' },
       ],
-      estimatedTime: '1 minute',
+      estimatedTime: '3 minutes',
     },
     [
       'Any emails from investors today?',
@@ -208,19 +217,32 @@ const CURATED: ServiceDefinition[] = [
     [
       {
         key: 'oauth',
-        label: 'Google Account',
+        label: 'n8n Credential Name',
         type: 'text',
-        placeholder: 'Sign in with Google',
+        placeholder: 'e.g. My Google Sheets',
         required: true,
+        helpText: 'The name you gave your Google Sheets credential in n8n (step 4 above).',
       },
     ],
     {
       title: 'Connect Google Sheets',
       steps: [
-        { instruction: 'Click "Connect" to sign in with your Google account' },
-        { instruction: 'Grant OpenPawz permission to access your spreadsheets' },
+        {
+          instruction: 'Open your n8n instance and go to Credentials',
+          link: 'http://localhost:5678/home/credentials',
+          tip: 'If n8n is on a different port, adjust the URL accordingly',
+        },
+        {
+          instruction:
+            'Click "Add Credential", search for "Google Sheets", and select the OAuth2 option',
+        },
+        {
+          instruction: 'Click "Sign in with Google" in n8n\'s credential form and authorize access',
+        },
+        { instruction: 'Name the credential (e.g. "My Google Sheets") and click Save' },
+        { instruction: 'Paste that same credential name below' },
       ],
-      estimatedTime: '1 minute',
+      estimatedTime: '3 minutes',
     },
     ['Read the Sales sheet', 'How many rows in my tracker?', 'What are the column headers?'],
     ['When a new row is added, send a Slack message', 'Sync CRM deals to a spreadsheet daily'],
@@ -1067,19 +1089,32 @@ const AUTO: ServiceDefinition[] = [
     [
       {
         key: 'oauth',
-        label: 'Google Account',
+        label: 'n8n Credential Name',
         type: 'text',
-        placeholder: 'Sign in with Google',
+        placeholder: 'e.g. My Google Calendar',
         required: true,
+        helpText: 'The name you gave your Google Calendar credential in n8n (step 4 above).',
       },
     ],
     {
       title: 'Connect Google Calendar',
       steps: [
-        { instruction: 'Click "Connect" to sign in with your Google account' },
-        { instruction: 'Grant OpenPawz permission to read and manage your calendar' },
+        {
+          instruction: 'Open your n8n instance and go to Credentials',
+          link: 'http://localhost:5678/home/credentials',
+          tip: 'If n8n is on a different port, adjust the URL accordingly',
+        },
+        {
+          instruction:
+            'Click "Add Credential", search for "Google Calendar", and select the OAuth2 option',
+        },
+        {
+          instruction: 'Click "Sign in with Google" in n8n\'s credential form and authorize access',
+        },
+        { instruction: 'Name the credential (e.g. "My Google Calendar") and click Save' },
+        { instruction: 'Paste that same credential name below' },
       ],
-      estimatedTime: '1 minute',
+      estimatedTime: '3 minutes',
     },
     ['What meetings do I have today?', 'Am I free tomorrow at 2pm?', "Show this week's events"],
     ['When a meeting is created, post in Slack', 'Daily agenda briefing at 8am'],
