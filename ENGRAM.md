@@ -660,7 +660,7 @@ Gaps are logged for diagnostic purposes.
 
 ## Adaptive Forgetting — FadeMem Dual-Layer Architecture
 
-Traditional memory systems treat forgetting as a failure mode. Engram treats it as a first-class cognitive mechanism, inspired by the FadeMem paper (arXiv:2601.18642, Jan 2026) which demonstrates that *measured* forgetting can reduce storage by 45% while simultaneously improving retrieval quality.
+Traditional memory systems treat forgetting as a failure mode. Engram treats it as a first-class cognitive mechanism, inspired by the FadeMem which demonstrates that *measured* forgetting can reduce storage by 45% while simultaneously improving retrieval quality.
 
 ### The Core Insight
 
@@ -782,7 +782,7 @@ The threshold (θ_fusion = 0.75 cosine) is derived from FadeMem's paper. Higher 
 
 Traditional retrieval (BM25 + vector + spreading activation) answers *local* queries well: "What does the user prefer for dark mode?" finds specific memories. But *global* queries fail: "Summarize everything I know about Project Alpha" requires reasoning across many memories that may not share keywords or embedding similarity.
 
-GraphRAG addresses this by treating the memory graph as a knowledge graph with detectable communities. Engram implements a dual-plane retrieval system inspired by Microsoft GraphRAG (2024), Deep GraphRAG (arXiv:2601.11144, 2026), and informed by WildGraphBench failure analysis (arXiv:2602.02053, 2026).
+GraphRAG addresses this by treating the memory graph as a knowledge graph with detectable communities. Engram implements a dual-plane retrieval system inspired by Microsoft GraphRAG, Deep GraphRAG, and informed by WildGraphBench failure analysis.
 
 ### Community Detection
 
@@ -841,7 +841,7 @@ The retrieval gate classifies queries into three planes:
 
 ### WildGraphBench Failure Defenses
 
-WildGraphBench (2026) identifies five failure modes where GraphRAG systems degrade. Engram defends against each:
+WildGraphBench identifies five failure modes where GraphRAG systems degrade. Engram defends against each:
 
 | Failure Mode | Defense |
 |---|---|
@@ -857,7 +857,7 @@ Deep GraphRAG's DW-GRPO training technique (Distributed Weighted Group Relative 
 
 ### GraphRAG-R1 Reward Signals
 
-GraphRAG-R1 (WWW 2026, arXiv:2507.23581) introduces two reward signals for training retrieval policies:
+GraphRAG-R1 introduces two reward signals for training retrieval policies:
 
 - **PRA (Progressive Retrieval Attenuation)** — Penalizes shallow single-hop retrieval. Rewards multi-hop reasoning that follows graph edges to deeper answers. Applied as a retrieval depth bonus: deeper traversals earn higher scores.
 - **CAF (Cost-Aware F1)** — Penalizes over-retrieval. A system that retrieves 50 memories to answer a simple question is punished even if the answer is correct. This naturally encourages budget-efficient retrieval.
@@ -870,7 +870,7 @@ Engram is the **first local-first GraphRAG implementation** in any agent memory 
 
 ## Compounding Skill Library
 
-Most agent memory systems only store *facts* — what happened, what is true. Engram also stores *skills* — executable, composable procedures that improve with every interaction. This is inspired by Voyager (NeurIPS 2023), Reflexion (NeurIPS 2023), and HELPER (EMNLP 2023).
+Most agent memory systems only store *facts* — what happened, what is true. Engram also stores *skills* — executable, composable procedures that improve with every interaction. This is inspired by Voyager, Reflexion, and HELPER.
 
 ```mermaid
 flowchart TD
@@ -905,8 +905,6 @@ Steps:
   3. SSH to staging: ssh deploy@staging
   4. Pull and restart: docker compose pull && docker compose up -d
 Trigger: "deploy to staging" OR "push to staging"
-Success rate: 3/3 (100%)
-Last used: 2026-02-28
 ```
 
 ### Skill Verification
@@ -1533,7 +1531,7 @@ These benchmarks run in CI. Performance regressions beyond defined thresholds bl
 
 ### PAPerBench — Attention Dilution Testing
 
-PAPerBench (arXiv:2602.15028, Feb 2026) reveals a critical truth: as context length grows, both personalization accuracy (PA) and privacy protection (PP) degrade — "attention dilution." Worse, **privacy degrades before quality** for every model tested. This directly affects memory injection.
+PAPerBench reveals a critical truth: as context length grows, both personalization accuracy (PA) and privacy protection (PP) degrade — "attention dilution." Worse, **privacy degrades before quality** for every model tested. This directly affects memory injection.
 
 Engram implements three-axis dilution testing derived from PAPerBench:
 
@@ -1552,7 +1550,7 @@ Per-model optimal injection caps are stored in the `ModelCapabilities` registry:
 
 ### DeepResearch Bench II — Binary Rubric Evaluation
 
-DeepResearch Bench II (arXiv:2601.08536, Jan 2026) provides the most rigorous evaluation methodology for deep research agents: 132 tasks across 22 domains evaluated with 9,430 binary rubrics. Even the best system (GPT-o3) achieves only 45.40% overall satisfaction.
+DeepResearch Bench II provides the most rigorous evaluation methodology for deep research agents: 132 tasks across 22 domains evaluated with 9,430 binary rubrics. Even the best system (GPT-5.3) achieves only 45.40% overall satisfaction.
 
 Engram adopts their three-tier rubric approach for self-evaluation:
 
@@ -1630,7 +1628,7 @@ This replaces silent truncation with intelligent handoffs. No competing product 
 
 ## The Intelligence Loop
 
-Engram's architecture is not a collection of independent features — it is a reinforcing loop where each principle strengthens the others. The Grand Research Synthesis (synthesizing all 21 papers from 2021-2026) reveals a unified intelligence architecture:
+Engram's architecture is not a collection of independent features — it is a reinforcing loop where each principle strengthens the others. The Grand Research Synthesis reveals a unified intelligence architecture:
 
 ```mermaid
 flowchart LR
