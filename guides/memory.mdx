@@ -293,3 +293,42 @@ Agents have access to 7 memory tools for direct memory management:
 | `memory_update` | Update an existing memory's content or metadata |
 | `memory_link` | Create a typed edge between two memories |
 | `memory_snapshot` | Export a point-in-time snapshot of the memory graph |
+
+## Flow memory integration
+
+When a flow runs, the executor automatically retrieves long-term memories so agent nodes have relevant context **before** they generate a response.
+
+### Pre-recall at flow start
+
+Before any node executes, the flow executor builds a memory query from the graph name and all agent prompts in the flow, then calls `pawEngine.memorySearch()`. The top results (filtered at score ≥ 0.3) are concatenated into a `memoryContext` string and stored in `FlowRunState`.
+
+Every agent node receives this context in a `[Relevant Memory]` section prepended to its prompt via `buildNodePrompt()`.
+
+### Cell-scoped memory in tesseract flows
+
+Tesseract flows split work into parallel **cells** — independent sub-graphs that execute concurrently. Each cell needs different memory because the agents inside serve different purposes (e.g. a research cell vs. an analysis cell).
+
+The Conductor solves this with **per-cell memory isolation**:
+
+1. For each cell, a focused query is built from the cell's agent prompts (up to 3 agents, 200 chars each, capped at 300 chars total)
+2. All cell queries are resolved concurrently via `deps.searchMemory()`, which calls `pawEngine.memorySearch()` with score ≥ 0.3 filtering
+3. Results are stored in an immutable `resolvedCellMemory` map — computed once before execution begins
+4. Each cell's executor receives a `ConductorDeps` wrapper that binds its memory override to every `executeNode` and `executeAgentStep` call
+
+This eliminates shared-state mutation — parallel cells never race on `runState.memoryContext`.
+
+### searchMemory IPC bridge
+
+The `searchMemory` function on `ConductorDeps` bridges the flow engine to the Rust memory backend:
+
+```typescript
+searchMemory: async (query: string, limit: number) => {
+  const results = await pawEngine.memorySearch(query, limit, agentId);
+  return results
+    .filter(m => m.score >= 0.3)
+    .map(m => `[${m.category}] ${m.content}`)
+    .join('\n');
+}
+```
+
+This is the same hybrid search pipeline (BM25 + vector + graph spreading activation) used in chat sessions, so flow agents benefit from the full Engram retrieval stack.

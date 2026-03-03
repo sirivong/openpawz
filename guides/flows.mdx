@@ -26,7 +26,7 @@ graph LR
 
 ## Integration types
 
-Every step in a flow is an integration. There are 9 kinds:
+Every step in a flow is an integration. There are 10 kinds:
 
 | Kind | Icon | Purpose |
 |------|------|---------|
@@ -39,6 +39,7 @@ Every step in a flow is an integration. There are 9 kinds:
 | **Output** | 📤 | Terminal step — log, send, store, or post to chat |
 | **Error** | ⚠️ | Error handler — catches failures from upstream integrations |
 | **Group** | 📁 | Sub-flow — compound integration containing nested steps |
+| **Event Horizon** | 🌀 | Synchronization barrier — collects outputs from parallel tesseract cells before continuing |
 
 ## Edge types
 
@@ -212,6 +213,36 @@ When a flow runs, a **flow report** appears in the chat conversation showing:
 - Progress bar
 - Each step's status, duration, and output
 - Final summary with success/error counts and total duration
+
+## Conductor Protocol
+
+The Conductor is an automatic optimization layer that analyzes flow graphs before execution. When the graph contains parallelizable structures, the Conductor compiles an `ExecutionStrategy` with optimized units:
+
+| Primitive | What it does |
+|-----------|-------------|
+| **Collapse** | Merges a sequence of non-branching nodes into a single execution unit |
+| **Extract** | Isolates a node with no internal dependencies for early execution |
+| **Parallelize** | Runs independent branches concurrently via `Promise.all` |
+| **Converge** | Waits for all parallel branches to finish before continuing |
+| **Tesseract** | Orchestrates parallel cells across phase and depth, synchronized at event horizons |
+
+The Conductor activates automatically when a flow has 4+ nodes, any parallel branches, or a mix of agent and non-agent nodes. No manual configuration is needed.
+
+→ Deep dive: [Conductor Protocol reference](/reference/conductor-protocol)
+
+### Tesseract flows
+
+A **tesseract flow** partitions the graph into independent **cells** — sub-graphs that share no data edges between them. Each cell executes its agents in topological order, and all cells run in parallel. An **event horizon** node acts as a synchronization barrier, collecting outputs from every cell via `mergeAtHorizon` before the flow continues.
+
+Tesseract flows are detected automatically when the graph contains 2+ disconnected agent clusters separated by non-agent boundaries.
+
+### Memory integration
+
+Before any node executes, the flow executor pre-recalls relevant long-term memories from the Engram memory system. Agent nodes receive these memories in a `[Relevant Memory]` section in their prompts.
+
+In tesseract flows, each cell gets its own **cell-scoped memory** — resolved from the cell's specific agent prompts — so parallel cells never race on shared memory state.
+
+→ Deep dive: [Memory guide](/guides/memory#flow-memory-integration)
 
 ## Persistence
 

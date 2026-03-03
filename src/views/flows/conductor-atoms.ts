@@ -36,19 +36,49 @@ export {
 import { classifyNode, detectCycles, computeDepthLevels } from './conductor-graph';
 import { detectCollapseChains } from './conductor-collapse';
 import { groupByDepth, splitIntoIndependentGroups, buildMeshConfigs } from './conductor-parallel';
+import {
+  hasTesseractStructure,
+  compileTesseractStrategy,
+  type TesseractStrategy,
+} from './conductor-tesseract';
+
+// Re-export Tesseract sub-module
+export {
+  hasTesseractStructure,
+  compileTesseractStrategy,
+  mergeAtHorizon,
+  findEventHorizons,
+  extractCellIds,
+  buildCellSubgraph,
+  parseEventHorizon,
+  findCellSinkNode,
+  type TesseractCell,
+  type TesseractStrategy,
+  type EventHorizon,
+  type MergePolicy,
+  type TesseractExecutionStep,
+} from './conductor-tesseract';
 
 /** A single unit in the compiled execution strategy. */
 export interface ExecutionUnit {
   /** Unique unit ID */
   id: string;
   /** Type of unit */
-  type: 'collapsed-agent' | 'direct-action' | 'single-agent' | 'single-direct' | 'mesh';
+  type:
+    | 'collapsed-agent'
+    | 'direct-action'
+    | 'single-agent'
+    | 'single-direct'
+    | 'mesh'
+    | 'tesseract';
   /** Node IDs in this unit (ordered) */
   nodeIds: string[];
   /** For collapsed-agent: merged compound prompt */
   mergedPrompt?: string;
   /** For mesh: max iterations */
   maxIterations?: number;
+  /** For tesseract: the compiled tesseract strategy */
+  tesseractStrategy?: TesseractStrategy;
   /** Dependencies: unit IDs that must complete before this unit starts */
   dependsOn: string[];
 }
@@ -81,6 +111,7 @@ export interface ExecutionStrategy {
     parallelPhases: number;
     meshCount: number;
     extractedNodes: number;
+    tesseractCells: number;
   };
 }
 
@@ -109,6 +140,8 @@ export function shouldUseConductor(graph: FlowGraph): boolean {
   for (const e of graph.edges) {
     if (e.kind === 'bidirectional') return true;
   }
+  // Tesseract structure (event-horizon nodes)
+  if (hasTesseractStructure(graph)) return true;
   // Mixed node types (agents + direct actions)
   const hasAgent = graph.nodes.some((n) => classifyNode(n) === 'agent');
   const hasDirect = graph.nodes.some((n) => classifyNode(n) === 'direct');
@@ -120,9 +153,77 @@ export function shouldUseConductor(graph: FlowGraph): boolean {
 /**
  * Compile an execution strategy from a flow graph.
  * This is the core of the Conductor Protocol — static analysis version.
- * (Phase 2.5 adds AI-based compilation on top of this.)
+ *
+ * If the graph contains tesseract structures (event-horizon nodes + cellId
+ * assignments), the tesseract compiler is invoked and the result is wrapped
+ * as a single tesseract unit. Otherwise, the standard 6-step pipeline runs.
+ *
+ * Phase 2.5 (AI-based compilation) can override this by calling
+ * buildConductorPrompt() and sending the result to an LLM.
  */
 export function compileStrategy(graph: FlowGraph): ExecutionStrategy {
+  // ── Tesseract path: if graph has event-horizon nodes, delegate ───────
+  if (hasTesseractStructure(graph)) {
+    return compileTesseractAsStrategy(graph);
+  }
+
+  return compileStandardStrategy(graph);
+}
+
+/**
+ * Wrap a tesseract compilation into the standard ExecutionStrategy shape.
+ */
+function compileTesseractAsStrategy(graph: FlowGraph): ExecutionStrategy {
+  const tesseract = compileTesseractStrategy(graph, compileStandardStrategy);
+  const allNodeIds = graph.nodes.filter((n) => n.kind !== 'event-horizon').map((n) => n.id);
+
+  let llmCalls = 0;
+  let directActions = 0;
+  for (const cell of tesseract.cells) {
+    llmCalls += cell.strategy.estimatedLlmCalls;
+    directActions += cell.strategy.estimatedDirectActions;
+  }
+
+  return {
+    graphId: graph.id,
+    phases: [
+      {
+        index: 0,
+        units: [
+          {
+            id: 'tesseract_root',
+            type: 'tesseract',
+            nodeIds: allNodeIds,
+            tesseractStrategy: tesseract,
+            dependsOn: [],
+          },
+        ],
+      },
+    ],
+    totalNodes: graph.nodes.length,
+    estimatedLlmCalls: llmCalls,
+    estimatedDirectActions: directActions,
+    conductorUsed: true,
+    meta: {
+      collapseGroups: tesseract.cells.reduce((sum, c) => sum + c.strategy.meta.collapseGroups, 0),
+      parallelPhases: Math.max(
+        // Count parallel phases within cells
+        tesseract.cells.reduce((sum, c) => sum + c.strategy.meta.parallelPhases, 0),
+        // Tesseract cell groups with >1 cell are inherently parallel
+        tesseract.executionOrder.filter((step) => step.kind === 'cells' && step.cellIds.length > 1)
+          .length,
+      ),
+      meshCount: tesseract.cells.reduce((sum, c) => sum + c.strategy.meta.meshCount, 0),
+      extractedNodes: tesseract.cells.reduce((sum, c) => sum + c.strategy.meta.extractedNodes, 0),
+      tesseractCells: tesseract.cells.length,
+    },
+  };
+}
+
+/**
+ * Standard (non-tesseract) strategy compilation: the original 6-step pipeline.
+ */
+function compileStandardStrategy(graph: FlowGraph): ExecutionStrategy {
   const nodeMap = new Map(graph.nodes.map((n) => [n.id, n]));
   let unitCounter = 0;
   const genUnitId = () => `unit_${++unitCounter}`;
@@ -265,24 +366,38 @@ export function compileStrategy(graph: FlowGraph): ExecutionStrategy {
       parallelPhases: phases.filter((p) => p.units.length > 1).length,
       meshCount: meshConfigs.length,
       extractedNodes: graph.nodes.filter((n) => classifyNode(n) === 'direct').length,
+      tesseractCells: 0,
     },
   };
 }
 
 /**
- * Get unit IDs that this node depends on (units from the previous phase).
+ * Get unit IDs that this node depends on.
+ * Walks backward edges to find parent nodes in earlier phases,
+ * then maps them to the unit IDs that contain those parents.
  */
 function getDependencies(
-  _nodeId: string,
+  nodeId: string,
   _depths: Map<string, number>,
-  _currentDepth: number,
+  currentDepth: number,
   _nodeMap: Map<string, FlowNode>,
-  _graph: FlowGraph,
+  graph: FlowGraph,
 ): string[] {
-  // For now, dependencies are handled implicitly by phase ordering.
-  // Units within a phase are independent; phases execute sequentially.
-  // This is a simplified model — Phase 2.5 can add explicit dependency tracking.
-  return [];
+  // Find direct parent nodes via backward edges
+  const parentIds: string[] = [];
+  for (const edge of graph.edges) {
+    if (edge.to === nodeId && edge.kind !== 'reverse') {
+      parentIds.push(edge.from);
+    }
+  }
+  // Return parent node IDs that are at a shallower depth (earlier phase).
+  // The executor resolves these to unit IDs when building the schedule,
+  // but listing the node-level dependencies ensures correctness:
+  // any unit containing a parent node must complete before this unit starts.
+  return parentIds.filter((pid) => {
+    const parentDepth = _depths.get(pid);
+    return parentDepth !== undefined && parentDepth < currentDepth;
+  });
 }
 
 /**
@@ -324,6 +439,7 @@ export function buildSequentialStrategy(graph: FlowGraph, plan: string[]): Execu
       parallelPhases: 0,
       meshCount: 0,
       extractedNodes: 0,
+      tesseractCells: 0,
     },
   };
 }

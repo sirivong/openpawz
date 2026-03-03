@@ -413,6 +413,30 @@ This is the natural extension of the Conductor's existing architecture. Parallel
 | **Converge** | Iterate mesh until stable | Iterate within a cell (Z) |
 | **Tesseract** | — | Orchestrate cells across phase (W) and depth (Z), sync at horizons |
 
+### Cell-scoped memory
+
+Tesseract cells operate in different behavioral modes — a research cell and an analysis cell need different long-term memory context. The Conductor provides **per-cell memory isolation** so parallel cells never race on shared state:
+
+1. **Query building** — For each cell, a focused memory query is built from the cell's agent prompts (up to 3 agents, 200 chars each, capped at 300 chars total)
+2. **Parallel resolution** — All cell queries are resolved concurrently via `deps.searchMemory()`, which calls `pawEngine.memorySearch()` with score ≥ 0.3 filtering
+3. **Immutable context map** — Resolved memory strings are stored in a `resolvedCellMemory` map, computed once before execution begins
+4. **Per-cell deps wrapper** — Each cell receives its own `ConductorDeps` wrapper that binds its memory override to `executeNode` and `executeAgentStep`, threading it through the call chain without mutating `runState.memoryContext`
+
+This eliminates the `Promise.all` race condition that would occur if parallel cells mutated a shared field. Each cell's agent nodes receive their own resolved memory context in the `[Relevant Memory]` section of their prompts.
+
+### Execution hardening
+
+Each tesseract cell is protected by multiple safety mechanisms:
+
+| Protection | Detail |
+|-----------|--------|
+| **Per-cell timeout** | Each cell races against `DEFAULT_CELL_TIMEOUT_MS` (5 min, overridable via `cellTimeoutMs` config). On timeout, the cell produces a `[Cell error: ...]` output instead of blocking the horizon. |
+| **Abort propagation** | `if (deps.isAborted()) return;` at the top of each cell task prevents work after flow abort. |
+| **Topology-based output** | `findCellSinkNode(cell, graph)` walks edges to find the node with no outgoing edges within the cell — reliable regardless of node insertion order. |
+| **Graceful degradation** | Cell failures are caught and recorded as error outputs; the horizon proceeds with partial data rather than crashing the flow. |
+| **Circular import prevention** | `conductor-tesseract.ts` imports only `type ExecutionStrategy` from `conductor-atoms.ts` (type-only, erased at runtime). The compiler is injected as a `compileSubgraph?` callback. |
+| **BFS caching** | `computeTopoDepth()` runs once per compile and is threaded through all functions via optional `topoDepths?` params — no redundant graph traversals. |
+
 ### Visualization: progressive disclosure
 
 The canvas uses **progressive disclosure** to avoid overwhelming users:
@@ -482,8 +506,9 @@ The Conductor doesn't blindly compile every flow. Small, simple flows run faster
 | Branching | Any node with fan-out > 1 |
 | Cycles | Any bidirectional edges |
 | Mixed types | Both agent and direct-action nodes present |
+| Tesseract | Any event-horizon nodes with cellId assignments |
 
-A 3-node linear flow (trigger → agent → output) skips the Conductor and runs sequentially. A 6-node flow with branches, tool calls, and an agent chain activates the Conductor. The crossover point is approximately 4 nodes — below that, compilation overhead exceeds the savings.
+A 3-node linear flow (trigger → agent → output) skips the Conductor and runs sequentially. A 6-node flow with branches, tool calls, and an agent chain activates the Conductor. A flow with event-horizon nodes and cellId assignments activates the Tesseract primitive regardless of node count. The crossover point for standard flows is approximately 4 nodes — below that, compilation overhead exceeds the savings.
 
 ---
 
@@ -715,6 +740,8 @@ async function runConductorStrategy(strategy: ExecutionStrategy) {
           return executeAgentStep(unit);        // 1 LLM call
         case 'mesh':
           return executeMeshRounds(unit);       // Iterative convergence
+        case 'tesseract':
+          return executeTesseractUnit(unit);    // Parallel cells + horizons
       }
     }));
   }
