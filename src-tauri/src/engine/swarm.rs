@@ -278,28 +278,52 @@ async fn run_swarm_turn(
         &user_tz,
     );
 
-    // ── Auto-recall memories for the swarm agent (squad + agent scoped) ────
+    // ── Auto-recall memories for the swarm agent (§55 gated search) ────
     let todays_memories = {
-        let _squad_mem_scope =
-            crate::atoms::engram_types::MemoryScope::squad(squad_id, recipient_id);
+        let scope = crate::atoms::engram_types::MemoryScope::squad(squad_id, recipient_id);
+        let search_config = crate::atoms::engram_types::MemorySearchConfig::default();
         let emb_client = state.embedding_client();
-        match crate::engine::engram::bridge::search(
+        match crate::engine::engram::gated_search::gated_search(
             &state.store,
             message_content,
-            10,
-            0.2,
+            &scope,
+            &search_config,
             emb_client.as_ref(),
-            Some(recipient_id),
+            0,            // no token budget limit
+            None,         // no momentum embeddings
+            Some(&model), // per-model injection limits (§58.5)
         )
         .await
         {
-            Ok(results) if !results.is_empty() => {
-                let mem_text = results
+            Ok(result) if !result.memories.is_empty() => {
+                let mem_text = result
+                    .memories
                     .iter()
                     .map(|r| format!("- [{}] {}", r.category, r.content))
                     .collect::<Vec<_>>()
                     .join("\n");
                 Some(format!("## Recalled Memories\n{}", mem_text))
+            }
+            Ok(result)
+                if result.gate == crate::engine::engram::gated_search::GateDecision::Refuse =>
+            {
+                info!(
+                    "[swarm] Memory quality gate refused results for squad '{}' agent '{}'",
+                    squad_id, recipient_id
+                );
+                None
+            }
+            Ok(result)
+                if matches!(
+                    result.gate,
+                    crate::engine::engram::gated_search::GateDecision::Defer(_)
+                ) =>
+            {
+                info!(
+                    "[swarm] Memory gate deferred for squad '{}' agent '{}': {:?}",
+                    squad_id, recipient_id, result.disambiguation_hint
+                );
+                None
             }
             _ => None,
         }

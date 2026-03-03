@@ -213,9 +213,15 @@ pub async fn search(
     // blend the current query embedding with the weighted average of
     // recent momentum vectors. This biases recall toward conversation trajectory.
     let mut vec_episodic: Vec<(EpisodicMemory, f64)> = Vec::new();
+    // §8.6 Capture the raw query embedding before momentum blending
+    // so callers can push it into the momentum vector for future queries.
+    let mut raw_query_embedding: Option<Vec<f32>> = None;
     if let Some(client) = embedding_client {
         match client.embed(query).await {
             Ok(query_emb) => {
+                // Capture the raw embedding before any blending
+                raw_query_embedding = Some(query_emb.clone());
+
                 // Apply momentum blending if we have trajectory history
                 let search_emb = if let Some(mom) = momentum_embeddings {
                     if !mom.is_empty() && !query_emb.is_empty() {
@@ -431,6 +437,10 @@ pub async fn search(
         result.quality.average_relevancy,
         result.quality.search_latency_ms,
     );
+
+    // §8.6 Attach the raw query embedding for trajectory tracking
+    let mut result = result;
+    result.query_embedding = raw_query_embedding;
 
     Ok(result)
 }

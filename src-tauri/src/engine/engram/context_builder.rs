@@ -34,7 +34,8 @@
 
 use crate::atoms::engram_types::{MemoryScope, MemorySearchConfig, RetrievedMemory};
 use crate::atoms::error::EngineResult;
-use crate::engine::engram::model_caps::resolve_model_capabilities;
+use crate::engine::engram::encryption;
+use crate::engine::engram::model_caps::{resolve_injection_resistance, resolve_model_capabilities};
 use crate::engine::engram::tokenizer::Tokenizer;
 use crate::engine::engram::working_memory::WorkingMemory;
 use crate::engine::memory::EmbeddingClient;
@@ -53,9 +54,6 @@ const MAX_SYSTEM_FRACTION: f32 = 0.45;
 
 /// Minimum tokens always reserved for the model's reply.
 const MIN_REPLY_TOKENS: usize = 1024;
-
-/// Maximum number of recalled memories to inject.
-const MAX_RECALLED_MEMORIES: usize = 20;
 
 /// Default recall BM25+vector similarity threshold.
 #[allow(dead_code)] // used once §5 self-tuning is wired
@@ -77,6 +75,9 @@ pub struct AssembledContext {
     pub budget: BudgetReport,
     /// Memories that were injected into the system prompt.
     pub recalled_memories: Vec<RetrievedMemory>,
+    /// §8.6 Raw query embedding from recall — push into WorkingMemory.push_momentum()
+    /// to enable trajectory-aware recall in subsequent turns.
+    pub query_embedding: Option<Vec<f32>>,
 }
 
 /// Token budget breakdown.
@@ -275,7 +276,8 @@ impl<'a> ContextBuilder<'a> {
         let mut sections = self.collect_sections();
 
         // ── 2. Auto-recall memories ──────────────────────────────────────
-        let mut recalled_memories = Vec::new();
+        let mut recalled_memories = Vec::new(); // §8.6 Trajectory-aware recall: capture the raw query embedding
+        let mut recall_query_embedding: Option<Vec<f32>> = None;
         if let (Some(store), Some(query)) = (self.store, &self.user_query) {
             let config = self.recall_config.clone().unwrap_or_default();
 
@@ -298,8 +300,42 @@ impl<'a> ContextBuilder<'a> {
             .await
             {
                 Ok(recall_result) => {
-                    recalled_memories = recall_result.memories;
-                    recalled_memories.truncate(MAX_RECALLED_MEMORIES);
+                    recall_query_embedding = recall_result.query_embedding;
+                    // §10.5 Decrypt encrypted content + §10.14 Sanitize injection
+                    // graph::search returns raw DB content — MUST decrypt + sanitize
+                    // before injecting into the system prompt.
+                    //
+                    // §58.5: Use model-appropriate sanitization level and limits.
+                    // The context builder is a DIRECT path to the LLM prompt,
+                    // so per-model injection resistance is critical here.
+                    let resistance = resolve_injection_resistance(&self.model);
+                    let enc_key = encryption::get_memory_encryption_key().ok();
+                    recalled_memories = recall_result
+                        .memories
+                        .into_iter()
+                        .map(|mut m| {
+                            if let Some(ref key) = enc_key {
+                                m.content = encryption::decrypt_memory_content(&m.content, key)
+                                    .unwrap_or(m.content);
+                            }
+                            // Level-aware sanitization (Standard/Strict/Paranoid per model tier)
+                            m.content = encryption::sanitize_recalled_memory_at_level(
+                                &m.content,
+                                resistance.sanitization_level,
+                            );
+                            // Per-model content length cap (§58.5)
+                            if m.content.len() > resistance.max_memory_content_chars {
+                                let mut end = resistance.max_memory_content_chars;
+                                while end > 0 && !m.content.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                m.content = format!("{}…[truncated]", &m.content[..end]);
+                            }
+                            m
+                        })
+                        .collect();
+                    // Per-model memory count cap (§58.5) instead of hardcoded MAX_RECALLED_MEMORIES
+                    recalled_memories.truncate(resistance.max_recalled_memories);
                 }
                 Err(e) => {
                     warn!("[engram:context] Memory recall failed: {}", e);
@@ -375,6 +411,7 @@ impl<'a> ContextBuilder<'a> {
             messages: trimmed_messages,
             budget,
             recalled_memories,
+            query_embedding: recall_query_embedding,
         })
     }
 

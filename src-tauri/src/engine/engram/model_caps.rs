@@ -81,6 +81,65 @@ pub fn resolve_max_output_tokens(model: &str) -> usize {
     resolve_model_capabilities(model).max_output_tokens
 }
 
+/// Resolve per-model injection resistance (§58.5 PAPerBench).
+///
+/// Instead of adding a field to all 45+ registry entries, we derive limits
+/// from existing capabilities. The principle: larger context = more injection
+/// surface, but also more robust models tend to have larger context.
+///
+/// Tiers:
+///   - Large + extended thinking (Opus/o-series/DeepSeek-R1): generous limits, Standard sanitization
+///   - Large (Sonnet/GPT-4o/Gemini): moderate limits, Standard sanitization
+///   - Medium (Haiku/GPT-4o-mini/smaller local): tighter limits, Strict sanitization
+///   - Small/unknown: conservative limits, Paranoid sanitization
+pub fn resolve_injection_resistance(
+    model: &str,
+) -> crate::atoms::engram_types::InjectionResistance {
+    use crate::atoms::engram_types::{InjectionResistance, SanitizationLevel};
+    let caps = resolve_model_capabilities(model);
+    let norm = normalize_model_name(model);
+
+    // Tier 1 is reserved for flagship reasoning models. Models like Sonnet
+    // that have extended_thinking but are not top-tier for injection robustness
+    // should NOT get the most permissive limits.
+    let is_flagship_reasoner = norm.contains("opus")
+        || norm.starts_with("o1")
+        || norm.starts_with("o3")
+        || norm.starts_with("o4")
+        || norm.contains("reasoner")
+        || norm.starts_with("codex-");
+
+    if is_flagship_reasoner && caps.supports_extended_thinking && caps.context_window >= 128_000 {
+        // Tier 1: Flagship reasoning models (Opus, o-series, DeepSeek Reasoner, Codex)
+        InjectionResistance {
+            max_recalled_memories: 20,
+            sanitization_level: SanitizationLevel::Standard,
+            max_memory_content_chars: 8_000,
+        }
+    } else if caps.context_window >= 100_000 {
+        // Tier 2: Large context (e.g., Sonnet, GPT-4o, Gemini Pro)
+        InjectionResistance {
+            max_recalled_memories: 15,
+            sanitization_level: SanitizationLevel::Standard,
+            max_memory_content_chars: 6_000,
+        }
+    } else if caps.context_window >= 32_000 {
+        // Tier 3: Medium context (e.g., Haiku, GPT-4o-mini, Mistral models)
+        InjectionResistance {
+            max_recalled_memories: 10,
+            sanitization_level: SanitizationLevel::Strict,
+            max_memory_content_chars: 4_000,
+        }
+    } else {
+        // Tier 4: Small/unknown context (conservative)
+        InjectionResistance {
+            max_recalled_memories: 5,
+            sanitization_level: SanitizationLevel::Paranoid,
+            max_memory_content_chars: 2_000,
+        }
+    }
+}
+
 // ── Internal: Model Registry ────────────────────────────────────────────
 
 /// A registry entry. Using a struct array instead of HashMap for prefix matching.
@@ -843,5 +902,44 @@ mod tests {
         assert_eq!(caps.context_window, 128_000);
         assert!(caps.supports_extended_thinking);
         assert_eq!(caps.provider, ModelProvider::DeepSeek);
+    }
+
+    // ── Injection Resistance Tests (§58.5) ──────────────────────────────
+
+    #[test]
+    fn test_injection_resistance_tier1_opus() {
+        use crate::atoms::engram_types::SanitizationLevel;
+        let r = resolve_injection_resistance("claude-opus-4-6");
+        assert_eq!(r.max_recalled_memories, 20);
+        assert_eq!(r.sanitization_level, SanitizationLevel::Standard);
+        assert_eq!(r.max_memory_content_chars, 8_000);
+    }
+
+    #[test]
+    fn test_injection_resistance_tier2_sonnet() {
+        use crate::atoms::engram_types::SanitizationLevel;
+        let r = resolve_injection_resistance("claude-sonnet-4");
+        // Sonnet 4: has extended_thinking but is NOT a flagship reasoner → Tier 2
+        assert_eq!(r.max_recalled_memories, 15);
+        assert_eq!(r.sanitization_level, SanitizationLevel::Standard);
+        assert_eq!(r.max_memory_content_chars, 6_000);
+    }
+
+    #[test]
+    fn test_injection_resistance_tier3_small() {
+        use crate::atoms::engram_types::SanitizationLevel;
+        let r = resolve_injection_resistance("gpt-4");
+        // GPT-4 original: 8K context → Tier 4 (small)
+        assert_eq!(r.max_recalled_memories, 5);
+        assert_eq!(r.sanitization_level, SanitizationLevel::Paranoid);
+    }
+
+    #[test]
+    fn test_injection_resistance_unknown_conservative() {
+        use crate::atoms::engram_types::SanitizationLevel;
+        let r = resolve_injection_resistance("some-random-model");
+        // Unknown: 32K default context → Tier 3
+        assert_eq!(r.max_recalled_memories, 10);
+        assert_eq!(r.sanitization_level, SanitizationLevel::Strict);
     }
 }

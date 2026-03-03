@@ -663,6 +663,42 @@ pub enum ModelProvider {
     Unknown,
 }
 
+/// Injection resistance posture for a model (§58.5 PAPerBench).
+/// Derived from the model's capabilities — larger, more capable models
+/// tolerate more recalled memories with less risk of prompt injection.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum SanitizationLevel {
+    /// Standard redaction: strip known injection patterns.
+    Standard,
+    /// Strict: standard + strip markdown directives, system-like prefixes.
+    Strict,
+    /// Paranoid: strict + aggressive truncation, no raw URLs/code blocks.
+    Paranoid,
+}
+
+/// Per-model injection resistance limits.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct InjectionResistance {
+    /// Maximum number of recalled memories injected per search.
+    pub max_recalled_memories: usize,
+    /// How aggressively to sanitize recalled content.
+    pub sanitization_level: SanitizationLevel,
+    /// Maximum characters per individual recalled memory content.
+    pub max_memory_content_chars: usize,
+}
+
+impl Default for InjectionResistance {
+    /// Conservative default for when model is unknown / not specified.
+    /// At least as restrictive as Tier 3 (explicit unknown model).
+    fn default() -> Self {
+        Self {
+            max_recalled_memories: 10,
+            sanitization_level: SanitizationLevel::Strict,
+            max_memory_content_chars: 4_000,
+        }
+    }
+}
+
 /// Tokenizer type — determines which tokenizer to use for accurate budget calculation.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum TokenizerType {
@@ -1100,6 +1136,10 @@ pub struct RecallResult {
     pub memories: Vec<RetrievedMemory>,
     /// Quality metrics for this retrieval (NDCG, relevancy, latency, etc.).
     pub quality: RetrievalQualityMetrics,
+    /// §8.6 The raw query embedding (pre-momentum blend), for trajectory tracking.
+    /// Callers push this into WorkingMemory.push_momentum() after each retrieval.
+    #[serde(skip)]
+    pub query_embedding: Option<Vec<f32>>,
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
