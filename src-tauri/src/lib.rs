@@ -85,6 +85,10 @@ pub fn run() {
     let engine_state =
         commands::state::EngineState::new().expect("Failed to initialize Paw Agent Engine");
 
+    // Initialize the cognitive event bus (§47.6 observability infrastructure).
+    // Must happen before any gated_search / working_memory calls.
+    engine::engram::cognitive_event::init();
+
     tauri::Builder::default()
         .manage(engine_state)
         .plugin(
@@ -183,6 +187,29 @@ pub fn run() {
                                     report.memories_decayed,
                                     report.memories_gc,
                                 );
+
+                                // §4.5 Self-Healing: inject gap prompts into all active agents'
+                                // working memory so they become aware of contradictions, stale
+                                // data, or incomplete schemas detected during consolidation.
+                                if !report.gap_prompts.is_empty() {
+                                    log::info!(
+                                        "[engram] Injecting {} gap prompts into active agents",
+                                        report.gap_prompts.len()
+                                    );
+                                    // Collect arcs briefly under the parking_lot lock, then release
+                                    let agent_states: Vec<(String, std::sync::Arc<tokio::sync::Mutex<engine::engram::CognitiveState>>)> = {
+                                        let cs_map = state.cognitive_states.lock();
+                                        cs_map.iter().map(|(k, v)| (k.clone(), std::sync::Arc::clone(v))).collect()
+                                    };
+                                    for (agent_id, cs_arc) in &agent_states {
+                                        let mut cs = cs_arc.lock().await;
+                                        cs.inject_gap_prompts(&report.gap_prompts);
+                                        log::debug!(
+                                            "[engram] Gap prompts injected for agent '{}'",
+                                            agent_id
+                                        );
+                                    }
+                                }
                             }
                             Err(e) => {
                                 log::warn!("[engram] Maintenance failed (non-fatal): {}", e);

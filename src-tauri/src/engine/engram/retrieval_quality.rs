@@ -121,7 +121,11 @@ pub fn build_recall_result(
         rerank_applied,
         hybrid_text_weight,
     );
-    RecallResult { memories, quality }
+    RecallResult {
+        memories,
+        quality,
+        query_embedding: None,
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

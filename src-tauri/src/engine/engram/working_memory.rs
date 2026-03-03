@@ -15,6 +15,7 @@
 // in memory. Persistence of snapshots is handled by the schema/store layer.
 
 use crate::atoms::engram_types::{WorkingMemorySlot, WorkingMemorySnapshot, WorkingMemorySource};
+use crate::engine::engram::cognitive_event;
 use crate::engine::engram::tokenizer::Tokenizer;
 
 /// The core working memory manager.
@@ -226,12 +227,29 @@ impl WorkingMemory {
         });
     }
 
-    /// Decay all slot priorities by a factor (e.g., 0.95 per turn).
-    /// This ensures old unreferenced memories gradually lose priority.
+    /// Decay all slot priorities by a source-aware factor (§54 FadeMem).
+    /// User mentions decay slowest (high value, user-stated facts), tool results
+    /// and sensory promotions decay fastest (transient/ephemeral data).
+    /// This ensures "remember I'm deploying to AWS" persists longer than a
+    /// transient tool output or recent-message echo — a core FadeMem insight.
     pub fn decay_priorities(&mut self, factor: f32) {
         for slot in &mut self.slots {
-            slot.priority *= factor;
+            let source_factor = match slot.source {
+                WorkingMemorySource::UserMention => factor.powf(0.3), // slow decay — user-stated facts
+                WorkingMemorySource::Recall => factor, // standard decay — LTM recalls
+                WorkingMemorySource::Restored => factor, // standard decay — session restores
+                WorkingMemorySource::SensoryBuffer => factor.powf(1.5), // fast decay — ephemeral echoes
+                WorkingMemorySource::ToolResult => factor.powf(1.3), // faster decay — transient tool output
+            };
+            slot.priority *= source_factor;
         }
+        cognitive_event::emit(
+            &self.agent_id,
+            cognitive_event::CognitiveEventKind::DecayApplied {
+                slots_count: self.slots.len(),
+                decay_factor: factor,
+            },
+        );
     }
 
     /// Add a query embedding to the momentum vector.

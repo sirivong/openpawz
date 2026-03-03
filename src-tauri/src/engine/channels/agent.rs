@@ -188,10 +188,71 @@ pub async fn run_channel_agent(
         );
     }
 
-    // Skip memory recall for channel bridges. Memory recall adds latency
-    // (BM25 + vector search) and ~1K chars of context per request.
-    // Channel bridges need speed and focus, not memory recall.
-    // Memory is still available on-demand via memory_search tool.
+    // ── Engram Cognitive Pipeline for channels (§1/§8) ────────────────
+    // Activate the same three-tier pipeline as chat: sensory buffer + working
+    // memory + gated_search. This gives channel users cross-session memory
+    // continuity (Discord/Slack/Telegram users can build on prior context).
+    // Uses a lightweight budget (top-5 recall, low-latency gate) to keep
+    // channel latency acceptable while still enabling trajectory recall.
+    let cognitive_lock = engine_state.get_cognitive_state(agent_id);
+    {
+        let mut cognitive = cognitive_lock.lock().await;
+        cognitive.decay_turn();
+        // §8.2 Adapt WM budget to the actual model for this channel request.
+        cognitive.adapt_wm_budget(&model);
+    }
+
+    // Lightweight gated recall — channel-scoped, with momentum from WM
+    let channel_recalled: Option<Vec<crate::atoms::engram_types::RetrievedMemory>> = {
+        let emb_client = engine_state.embedding_client();
+        let scope = crate::atoms::engram_types::MemoryScope {
+            agent_id: Some(agent_id.to_string()),
+            channel: Some(channel_prefix.to_string()),
+            channel_user_id: Some(user_id.to_string()),
+            ..Default::default()
+        };
+        let config = crate::atoms::engram_types::MemorySearchConfig::default();
+        // Get momentum from cognitive state for trajectory recall
+        let cognitive = cognitive_lock.lock().await;
+        let mom_vecs: Vec<Vec<f32>> = cognitive.working_memory.momentum().to_vec();
+        let mom_ref: Option<&[Vec<f32>]> = if mom_vecs.is_empty() {
+            None
+        } else {
+            Some(&mom_vecs)
+        };
+        drop(cognitive);
+
+        match engram::gated_search::gated_search(
+            &engine_state.store,
+            message,
+            &scope,
+            &config,
+            emb_client.as_ref(),
+            8_000, // lightweight budget for channels
+            mom_ref,
+            Some(&model), // per-model injection limits (§58.5)
+        )
+        .await
+        {
+            Ok(result) if !result.memories.is_empty() => {
+                info!(
+                    "[{}] Engram gated recall: {} memories for agent '{}'",
+                    channel_prefix,
+                    result.memories.len(),
+                    agent_id
+                );
+                Some(result.memories)
+            }
+            Ok(_) => None,
+            Err(e) => {
+                warn!(
+                    "[{}] Engram recall failed (non-fatal): {}",
+                    channel_prefix, e
+                );
+                None
+            }
+        }
+    };
 
     // Build full system prompt — MINIMAL version for channel bridges.
     //
@@ -241,6 +302,25 @@ pub async fn run_channel_agent(
             - **If a call fails, try again.** Don't give up or ask the user to do it manually.\n\
             - **Keep responses short.** Brief updates between actions, not essays.".to_string()
         );
+
+        // 6. Engram recalled memories (§8) — inject relevant cross-session context
+        if let Some(ref recalled) = channel_recalled {
+            let mut mem_parts: Vec<String> = Vec::new();
+            mem_parts.push("## Recalled Context".to_string());
+            for (i, mem) in recalled.iter().take(5).enumerate() {
+                mem_parts.push(format!("{}. [{}] {}", i + 1, mem.memory_type, mem.content,));
+            }
+            parts.push(mem_parts.join("\n"));
+        }
+
+        // 7. Working memory context (Tier 1)
+        {
+            let cognitive = cognitive_lock.lock().await;
+            let wm_text = cognitive.working_memory.format_for_context();
+            if !wm_text.is_empty() {
+                parts.push(format!("## Working Memory\n{}", wm_text));
+            }
+        }
 
         let prompt = parts.join("\n\n---\n\n");
         info!(
@@ -513,6 +593,14 @@ pub async fn run_channel_agent(
 
     // Auto-capture memories (with dedup)
     if let Ok(final_text) = &result {
+        // §3.1 Push into sensory buffer → working memory promotion pipeline
+        // This gives channel users the same Tier 0 → Tier 1 promotion
+        // that chat users get, enabling cross-turn context within a session.
+        if !final_text.is_empty() {
+            let mut cognitive = cognitive_lock.lock().await;
+            cognitive.push_message(message, final_text);
+        }
+
         let auto_capture = engine_state.memory_config.lock().auto_capture;
         if auto_capture && !final_text.is_empty() {
             let facts = memory::extract_memorable_facts(message, final_text);

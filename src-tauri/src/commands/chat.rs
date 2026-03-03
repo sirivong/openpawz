@@ -329,6 +329,21 @@ pub async fn engine_chat_send(
         ..Default::default()
     };
 
+    // ── Activate Cognitive State (Engram three-tier pipeline) ────────────
+    // Get or create the per-agent CognitiveState. This holds the sensory
+    // buffer (Tier 0) and working memory (Tier 1). Tier 2 is SessionStore.
+    // Uses Arc<tokio::sync::Mutex> per agent — safe to hold across .await.
+    let cognitive_lock = state.get_cognitive_state(&agent_id_owned);
+    let mut cognitive = cognitive_lock.lock().await;
+
+    // Decay working memory priorities each turn (0.95× factor)
+    cognitive.decay_turn();
+
+    // §8.2 Adapt WM budget to the actual model being used this turn.
+    // The CognitiveState may have been created with the default model's budget,
+    // but auto-tier routing or explicit model selection can change the model.
+    cognitive.adapt_wm_budget(&model);
+
     let mut builder = engram::context_builder::ContextBuilder::new(&model)
         .context_window(context_window_override);
 
@@ -362,6 +377,8 @@ pub async fn engine_chat_send(
             request.message.clone(),
         );
     }
+    // Wire working memory into the ContextBuilder (Tier 1 → prompt assembly)
+    builder = builder.working_memory(&cognitive.working_memory);
     builder = builder.messages(history_pairs);
 
     // Build the assembled context
@@ -378,6 +395,15 @@ pub async fn engine_chat_send(
                 ctx.budget.messages_included,
                 ctx.budget.messages_included + ctx.budget.messages_trimmed,
             );
+
+            // §8.6 Trajectory-aware recall: push the raw query embedding into
+            // the momentum vector. On subsequent turns, graph::search will blend
+            // the new query with this history to bias recall toward conversation
+            // direction — critical for anaphoric queries ("deploy it", "fix that").
+            if let Some(emb) = ctx.query_embedding {
+                cognitive.working_memory.push_momentum(emb);
+            }
+
             // Prepend system prompt as a system message, then add history
             let mut chat_messages: Vec<Message> = Vec::new();
             if let Some(ref sys) = ctx.system_prompt {
@@ -456,6 +482,10 @@ pub async fn engine_chat_send(
 
     // ── Process attachments into multi-modal blocks (organism) ────────────
     chat_org::process_attachments(&request.message, &request.attachments, &mut messages);
+
+    // Release cognitive state lock after ContextBuilder is done borrowing it.
+    // The spawn closure will re-acquire it when the response is ready.
+    drop(cognitive);
 
     // ── Clear loaded tools for this new chat turn ─────────────────────────
     // Tool RAG: reset the set of dynamically-loaded tools so each turn starts fresh.
@@ -600,6 +630,22 @@ pub async fn engine_chat_send(
                             if let Err(e) = engine_state.store.add_message(&stored) {
                                 error!("[engine] Failed to store message: {}", e);
                             }
+                        }
+                    }
+
+                    // ── Push message pair into sensory buffer (Tier 0) ──
+                    // This feeds the three-tier cognitive pipeline so that
+                    // recent exchanges are available in working memory.
+                    if !final_text.is_empty() {
+                        let cognitive_lock = engine_state.get_cognitive_state(&agent_id_for_spawn);
+                        let mut cognitive = cognitive_lock.lock().await;
+                        let wm_evictions =
+                            cognitive.push_message(&user_message_for_capture, &final_text);
+                        if wm_evictions > 0 {
+                            info!(
+                                "[engine] Sensory buffer push: {} WM evictions for agent '{}'",
+                                wm_evictions, agent_id_for_spawn
+                            );
                         }
                     }
 

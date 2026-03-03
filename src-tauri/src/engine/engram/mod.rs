@@ -24,15 +24,19 @@
 //   - abstraction_tree: 4-level hierarchical semantic compression (§42)
 //   - memory_bus: Multi-agent memory sync pub/sub protocol (§43)
 //   - dream_replay: Idle-time memory replay & connection discovery (§44)
+//   - cognitive_event: Observability bus for cognitive pipeline events (§47.6)
 
 pub mod abstraction_tree;
 pub mod bridge;
+pub mod cognitive_event;
+pub mod cognitive_state;
 pub mod consolidation;
 pub mod context_builder;
 pub mod dream_replay;
 pub mod emotional_memory;
 pub mod encryption;
 pub mod entity_tracking;
+pub mod gated_search;
 pub mod graph;
 pub mod hybrid_search;
 pub mod intent_classifier;
@@ -50,6 +54,8 @@ pub mod working_memory;
 
 // Re-exports for convenience
 pub use abstraction_tree::{build_tree, pack_with_fallback, select_level};
+pub use cognitive_event::CognitiveEventBus;
+pub use cognitive_state::CognitiveState;
 pub use consolidation::{run_consolidation, ConsolidationReport, GapKind, KnowledgeGap};
 pub use context_builder::{AssembledContext, BudgetReport, ContextBuilder};
 pub use dream_replay::run_replay;
@@ -58,6 +64,7 @@ pub use emotional_memory::{
     modulated_half_life, score_affect,
 };
 pub use entity_tracking::{extract_entities, merge_entities, process_memory_entities};
+pub use gated_search::{gate_decision, gated_search, DeferReason, GateDecision, GatedSearchResult};
 pub use graph::{
     apply_decay, garbage_collect, memory_stats, relate, search, store_episodic_dedup,
     store_procedural, store_semantic_dedup, EngramStats,
@@ -70,7 +77,8 @@ pub use meta_cognition::{
 };
 pub use metadata_inference::{infer_metadata, infer_metadata_full};
 pub use model_caps::{
-    resolve_context_window, resolve_max_output_tokens, resolve_model_capabilities,
+    resolve_context_window, resolve_injection_resistance, resolve_max_output_tokens,
+    resolve_model_capabilities,
 };
 pub use reranking::{cross_type_dedup, rerank_results};
 pub use retrieval_quality::{

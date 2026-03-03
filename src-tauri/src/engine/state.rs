@@ -2,6 +2,7 @@
 // Canonical home for EngineState and related types.
 // commands/state.rs re-exports everything from here for backward compatibility.
 
+use crate::engine::engram::CognitiveState;
 use crate::engine::memory::EmbeddingClient;
 use crate::engine::sessions::SessionStore;
 use crate::engine::tool_index::ToolIndex;
@@ -9,6 +10,7 @@ use crate::engine::types::*;
 
 use crate::engine::mcp::McpRegistry;
 
+use crate::atoms::engram_types::EngramConfig;
 use crate::atoms::error::EngineResult;
 use log::info;
 use parking_lot::Mutex;
@@ -339,6 +341,11 @@ pub struct EngineState {
     /// Per-session yield signals (VS Code pattern).
     /// When a queued request arrives, the active agent is asked to wrap up.
     pub yield_signals: YieldSignals,
+    /// Per-agent cognitive state (Engram three-tier pipeline).
+    /// Keyed by agent_id. Each agent gets its own SensoryBuffer + WorkingMemory.
+    /// Uses tokio::sync::Mutex per-agent to allow holding across .await points
+    /// (e.g., ContextBuilder.build()) without race conditions.
+    pub cognitive_states: Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<CognitiveState>>>>>,
 }
 
 impl EngineState {
@@ -400,7 +407,46 @@ impl EngineState {
             loaded_tools: Arc::new(Mutex::new(HashSet::new())),
             request_queue: Arc::new(Mutex::new(HashMap::new())),
             yield_signals: Arc::new(Mutex::new(HashMap::new())),
+            cognitive_states: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// Get or create the CognitiveState for an agent.
+    /// Returns an Arc<tokio::sync::Mutex<CognitiveState>> that callers can
+    /// .lock().await to access the state safely — even across async boundaries.
+    /// No remove-and-put-back pattern needed; eliminates race conditions.
+    pub fn get_cognitive_state(&self, agent_id: &str) -> Arc<tokio::sync::Mutex<CognitiveState>> {
+        let mut states = self.cognitive_states.lock();
+        if let Some(cs) = states.get(agent_id) {
+            return Arc::clone(cs);
+        }
+
+        // Load engram config for defaults
+        let engram_config = self
+            .store
+            .get_config("engram_config")
+            .ok()
+            .flatten()
+            .and_then(|json| serde_json::from_str::<EngramConfig>(&json).ok())
+            .unwrap_or_default();
+
+        // §8.2 Budget-adaptive WM: derive working memory token budget from the
+        // model's actual context window instead of a fixed 4096. Allocate ~10%
+        // of the context window (clamped to [2048, 32768]) — large models get
+        // more WM slots, small models avoid over-allocation.
+        let wm_budget = {
+            let cfg = self.config.lock();
+            let model = cfg.default_model.clone().unwrap_or_else(|| "gpt-4o".into());
+            let caps = crate::engine::engram::model_caps::resolve_model_capabilities(&model);
+            let adaptive = caps.context_window / 10;
+            adaptive.clamp(2048, 32768)
+        };
+
+        let cs = CognitiveState::new(agent_id.to_string(), &engram_config, wm_budget);
+        let arc_cs = Arc::new(tokio::sync::Mutex::new(cs));
+        states.insert(agent_id.to_string(), Arc::clone(&arc_cs));
+        info!("[engine] Created CognitiveState for agent '{}'", agent_id);
+        arc_cs
     }
 
     /// Get an EmbeddingClient from the current memory config, if configured.

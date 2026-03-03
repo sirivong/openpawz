@@ -164,31 +164,56 @@ pub async fn run_project(app_handle: &tauri::AppHandle, project_id: &str) -> Eng
         sys_parts.push(skill_instructions.clone());
     }
 
-    // §17 Pre-recall: inject relevant memories into orchestrator context
+    // §17 Pre-recall: inject relevant memories via gated search (§7)
+    // Replaces direct bridge::search() with intent-aware, quality-gated retrieval.
     {
         let emb_client = state.embedding_client();
-        match crate::engine::engram::bridge::search(
+        let scope = crate::atoms::engram_types::MemoryScope::agent(&project.boss_agent);
+        let search_config = crate::atoms::engram_types::MemorySearchConfig::default();
+        match crate::engine::engram::gated_search::gated_search(
             &state.store,
             &project.goal,
-            10,
-            0.2,
+            &scope,
+            &search_config,
             emb_client.as_ref(),
-            Some(&project.boss_agent),
+            0,            // no token budget limit for orchestrator
+            None,         // no momentum embeddings
+            Some(&model), // per-model injection limits (§58.5)
         )
         .await
         {
-            Ok(memories) if !memories.is_empty() => {
+            Ok(result) if !result.memories.is_empty() => {
                 let mut memory_block = String::from(
                     "## Relevant Memories\nPrior knowledge that may help with this project:\n",
                 );
-                for m in &memories {
+                for m in &result.memories {
                     memory_block.push_str(&format!("- [{}] {}\n", m.category, m.content));
                 }
                 sys_parts.push(memory_block);
                 info!(
-                    "[orchestrator] Pre-recalled {} memories for project '{}'",
-                    memories.len(),
+                    "[orchestrator] Pre-recalled {} memories (gate={:?}) for project '{}'",
+                    result.memories.len(),
+                    result.gate,
                     project.title
+                );
+            }
+            Ok(result)
+                if result.gate == crate::engine::engram::gated_search::GateDecision::Refuse =>
+            {
+                info!(
+                    "[orchestrator] Memory quality gate refused results for project '{}' (CRAG Incorrect tier)",
+                    project.title
+                );
+            }
+            Ok(result)
+                if matches!(
+                    result.gate,
+                    crate::engine::engram::gated_search::GateDecision::Defer(_)
+                ) =>
+            {
+                info!(
+                    "[orchestrator] Memory gate deferred for project '{}': {:?}",
+                    project.title, result.disambiguation_hint
                 );
             }
             Ok(_) => {}

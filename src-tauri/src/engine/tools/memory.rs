@@ -279,28 +279,35 @@ async fn execute_memory_search(
         .ok_or("Engine state not available")?;
     let emb_client = state.embedding_client();
 
-    // Search via Engram (BM25 + vector + graph fusion) — scoped to calling agent
-    let engram_results = engram::bridge::search(
+    // Search via Engram gated search (§55) — intent-aware, quality-gated retrieval
+    let scope = crate::atoms::engram_types::MemoryScope::agent(agent_id);
+    let search_config = crate::atoms::engram_types::MemorySearchConfig::default();
+    let gated_result = engram::gated_search::gated_search(
         &state.store,
         query,
-        limit,
-        0.1,
+        &scope,
+        &search_config,
         emb_client.as_ref(),
-        Some(agent_id),
+        0,    // no token budget limit for tool search
+        None, // no momentum embeddings
+        None, // tool search — conservative injection limits
     )
     .await?;
 
-    if !engram_results.is_empty() {
-        let mut output = format!("Found {} relevant memories:\n\n", engram_results.len());
-        for (i, mem) in engram_results.iter().enumerate() {
+    if !gated_result.memories.is_empty() {
+        let mut output = format!(
+            "Found {} relevant memories:\n\n",
+            gated_result.memories.len()
+        );
+        for (i, mem) in gated_result.memories.iter().enumerate() {
             output.push_str(&format!(
                 "{}. [{}] ({}) {} (id: {}, score: {:.2})\n",
                 i + 1,
                 mem.category,
                 mem.memory_type,
                 mem.content,
-                &mem.id[..mem.id.len().min(8)],
-                mem.score,
+                &mem.memory_id[..mem.memory_id.len().min(8)],
+                mem.trust_score.composite(),
             ));
         }
         return Ok(output);
@@ -646,4 +653,182 @@ fn execute_memory_relate(
         relation,
         &target_id[..target_id.len().min(8)]
     ))
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Tests
+// ═════════════════════════════════════════════════════════════════════════════
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Tool Definition Schema Tests ─────────────────────────────────────
+
+    #[test]
+    fn test_definitions_memory_delete_uses_memory_id() {
+        let defs = definitions();
+        let delete_def = defs
+            .iter()
+            .find(|d| d.function.name == "memory_delete")
+            .expect("memory_delete definition must exist");
+        let props = &delete_def.function.parameters["properties"];
+        assert!(
+            props.get("memory_id").is_some(),
+            "memory_delete must use 'memory_id' (not 'id') in schema"
+        );
+        assert!(
+            props.get("id").is_none(),
+            "memory_delete must NOT have legacy 'id' field"
+        );
+        let required = delete_def.function.parameters["required"]
+            .as_array()
+            .expect("required must be an array");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("memory_id")),
+            "memory_delete must require 'memory_id'"
+        );
+    }
+
+    #[test]
+    fn test_definitions_memory_update_uses_memory_id() {
+        let defs = definitions();
+        let update_def = defs
+            .iter()
+            .find(|d| d.function.name == "memory_update")
+            .expect("memory_update definition must exist");
+        let props = &update_def.function.parameters["properties"];
+        assert!(
+            props.get("memory_id").is_some(),
+            "memory_update must use 'memory_id'"
+        );
+        let required = update_def.function.parameters["required"]
+            .as_array()
+            .expect("required must be an array");
+        assert!(
+            required.iter().any(|v| v.as_str() == Some("memory_id")),
+            "memory_update must require 'memory_id'"
+        );
+    }
+
+    #[test]
+    fn test_definitions_memory_feedback_uses_memory_id() {
+        let defs = definitions();
+        let feedback_def = defs
+            .iter()
+            .find(|d| d.function.name == "memory_feedback")
+            .expect("memory_feedback definition must exist");
+        let props = &feedback_def.function.parameters["properties"];
+        assert!(
+            props.get("memory_id").is_some(),
+            "memory_feedback must use 'memory_id'"
+        );
+    }
+
+    #[test]
+    fn test_definitions_all_tools_present() {
+        let defs = definitions();
+        let names: Vec<&str> = defs.iter().map(|d| d.function.name.as_str()).collect();
+        assert!(names.contains(&"memory_store"), "missing memory_store");
+        assert!(names.contains(&"memory_search"), "missing memory_search");
+        assert!(names.contains(&"memory_delete"), "missing memory_delete");
+        assert!(names.contains(&"memory_update"), "missing memory_update");
+        assert!(
+            names.contains(&"memory_feedback"),
+            "missing memory_feedback"
+        );
+        assert!(names.contains(&"memory_stats"), "missing memory_stats");
+        assert!(names.contains(&"memory_list"), "missing memory_list");
+        assert!(
+            names.contains(&"memory_knowledge"),
+            "missing memory_knowledge"
+        );
+        assert!(names.contains(&"memory_relate"), "missing memory_relate");
+    }
+
+    // ── Output Format Regression Tests ───────────────────────────────────
+
+    #[test]
+    fn test_search_output_format_uses_new_field_names() {
+        use crate::atoms::engram_types::{
+            CompressionLevel, MemoryType, RetrievedMemory, TrustScore,
+        };
+
+        // Simulate the output format string from execute_memory_search
+        let mem = RetrievedMemory {
+            content: "User prefers dark mode".to_string(),
+            compression_level: CompressionLevel::Full,
+            memory_id: "abc12345-6789-0000-0000-000000000000".to_string(),
+            memory_type: MemoryType::Episodic,
+            trust_score: TrustScore::default(),
+            token_cost: 10,
+            category: "preference".to_string(),
+            created_at: "2025-01-01T00:00:00Z".to_string(),
+        };
+
+        // This is the exact format string from execute_memory_search
+        let output = format!(
+            "{}. [{}] ({}) {} (id: {}, score: {:.2})\n",
+            1,
+            mem.category,
+            mem.memory_type,
+            mem.content,
+            &mem.memory_id[..mem.memory_id.len().min(8)],
+            mem.trust_score.composite(),
+        );
+
+        // Verify the output contains the truncated memory_id (not legacy 'id')
+        assert!(
+            output.contains("id: abc12345"),
+            "Output must show truncated memory_id: got '{}'",
+            output
+        );
+        // Verify score is from trust_score.composite()
+        assert!(
+            output.contains("score: "),
+            "Output must show composite trust score: got '{}'",
+            output
+        );
+        // Verify memory_type is shown (Display impl uses lowercase)
+        assert!(output.contains("episodic"), "Output must show memory type");
+        // Verify category is shown
+        assert!(output.contains("preference"), "Output must show category");
+    }
+
+    #[test]
+    fn test_trust_score_composite_in_output_range() {
+        use crate::atoms::engram_types::TrustScore;
+
+        let ts = TrustScore::default();
+        let score = ts.composite();
+        assert!(
+            (0.0..=1.0).contains(&score),
+            "Default TrustScore.composite() must be in [0, 1]: got {}",
+            score
+        );
+    }
+
+    #[test]
+    fn test_memory_id_truncation_short_id() {
+        // Edge case: memory_id shorter than 8 chars
+        let short_id = "abc";
+        let truncated = &short_id[..short_id.len().min(8)];
+        assert_eq!(truncated, "abc", "Short IDs should not panic on truncation");
+    }
+
+    #[test]
+    fn test_definitions_no_legacy_id_field() {
+        // Regression: ensure NO tool definition uses plain "id" as a param name
+        let defs = definitions();
+        for def in &defs {
+            let props = &def.function.parameters["properties"];
+            if let Some(obj) = props.as_object() {
+                assert!(
+                    !obj.contains_key("id"),
+                    "Tool '{}' must not use legacy 'id' field — use 'memory_id' instead",
+                    def.function.name
+                );
+            }
+        }
+    }
 }
