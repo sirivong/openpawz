@@ -3728,9 +3728,10 @@
 
     <!-- Exec Approval Modal -->
     <div class="modal-overlay" id="approval-modal" style="display: none">
-      <div class="modal-card" id="approval-modal-card" style="width: 480px">
+      <div class="modal-card" id="approval-modal-card" style="width: 500px">
         <div class="modal-header" id="approval-modal-header">
           <h2 class="modal-title" id="approval-modal-title">Tool Approval Required</h2>
+          <span class="approval-tier-badge" id="approval-tier-badge"></span>
           <button class="btn-icon" id="approval-modal-close">✕</button>
         </div>
         <!-- Risk badge (hidden by default, shown for dangerous commands) -->
@@ -3745,7 +3746,11 @@
         <div id="approval-network-banner" class="network-banner" style="display: none"></div>
         <div class="modal-body">
           <p id="approval-modal-desc" style="color: var(--text-secondary); margin-bottom: 12px"></p>
-          <div id="approval-modal-details" class="approval-details"></div>
+          <!-- Collapsed details (VS Code pattern: collapsed by default) -->
+          <details class="approval-details-collapsible" id="approval-details-toggle">
+            <summary class="approval-details-summary">Show parameters</summary>
+            <div id="approval-modal-details" class="approval-details"></div>
+          </details>
         </div>
         <div class="modal-footer" id="approval-modal-footer">
           <!-- Session override dropdown -->
@@ -3777,6 +3782,15 @@
             />
           </div>
           <button class="btn btn-primary" id="approval-allow-btn">Allow</button>
+        </div>
+        <!-- Always Allow actions (VS Code pattern) -->
+        <div class="approval-always-actions" id="approval-always-actions">
+          <button class="btn btn-ghost btn-sm" id="approval-always-allow-btn" title="Auto-approve this tool for all future requests">
+            <span class="ms" style="font-size: 14px">verified</span> Always allow <strong id="approval-always-tool-name"></strong>
+          </button>
+          <button class="btn btn-ghost btn-sm" id="approval-always-pattern-btn" title="Auto-approve all commands matching this pattern" style="display: none">
+            <span class="ms" style="font-size: 14px">pattern</span> Always allow <code id="approval-always-pattern-text"></code>
+          </button>
         </div>
       </div>
     </div>

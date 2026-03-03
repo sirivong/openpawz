@@ -555,6 +555,23 @@ export function saveSecuritySettings(settings: SecuritySettings): void {
 }
 
 /**
+ * Add a regex pattern to the command allowlist and persist.
+ * Used by "Always Allow pattern" button in HIL modal.
+ */
+export function addToCommandAllowlist(pattern: string): void {
+  const settings = loadSecuritySettings();
+  if (!settings.commandAllowlist.includes(pattern)) {
+    const error = validateRegexPattern(pattern);
+    if (error) {
+      console.warn('[security] Rejected invalid allowlist pattern:', pattern, error);
+      return;
+    }
+    settings.commandAllowlist.push(pattern);
+    saveSecuritySettings(settings);
+  }
+}
+
+/**
  * Reset security settings to defaults — clears DB row and resets cache.
  */
 export async function resetSecuritySettings(): Promise<void> {

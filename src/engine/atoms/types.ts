@@ -128,6 +128,8 @@ export interface EngineEvent {
   text?: string;
   // tool_request
   tool_call?: { id: string; type: string; function: { name: string; arguments: string } };
+  /** Tool tier: "safe" | "reversible" | "external" | "dangerous" | "unknown" */
+  tool_tier?: string;
   // tool_result
   tool_call_id?: string;
   output?: string;
