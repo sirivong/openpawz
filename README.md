@@ -519,7 +519,7 @@ Without a running keychain, credential encryption will fail and integrations won
 git clone https://github.com/OpenPawz/openpawz.git
 cd paw
 
-# 2. Install frontend dependencies
+# 2. Install frontend dependencies (includes anime.js for UI animations)
 pnpm install
 
 # 3. Run in development mode (hot-reload frontend + live Rust rebuilds)
@@ -527,13 +527,15 @@ pnpm tauri dev
 ```
 
 > **First build takes 3–5 minutes** while Rust compiles all dependencies. Subsequent builds are incremental (~5–15 seconds).
+>
+> **After pulling updates**, always re-run `pnpm install` to pick up any new dependencies.
 
 ### Frontend Only (No Rust / Tauri Required)
 
 If you just want to run the frontend UI without the Rust backend (useful for UI development or quick previews):
 
 ```bash
-pnpm install
+pnpm install          # required after every git pull to pick up new deps
 pnpm dev
 ```
 
