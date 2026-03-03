@@ -306,6 +306,17 @@ export function getUserApprovedTools(): string[] {
       approved.push(...cat.tools);
     }
   }
+  // Include per-tool "Always Allow" entries from HIL modal
+  try {
+    const alwaysAllowed: string[] = JSON.parse(
+      localStorage.getItem('paw-always-allow-tools') ?? '[]',
+    );
+    for (const t of alwaysAllowed) {
+      if (!approved.includes(t)) approved.push(t);
+    }
+  } catch {
+    /* ignore */
+  }
   return approved;
 }
 

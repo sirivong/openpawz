@@ -148,6 +148,9 @@ pub enum EngineEvent {
         session_id: String,
         run_id: String,
         tool_call: ToolCall,
+        /// Tool classification: "safe", "reversible", "external", "dangerous", "unknown"
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_tier: Option<String>,
     },
     /// A tool finished executing
     #[serde(rename = "tool_result")]

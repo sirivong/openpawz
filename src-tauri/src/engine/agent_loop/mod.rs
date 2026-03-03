@@ -484,20 +484,28 @@ pub async fn run_agent_turn(
         }
 
         // ── 5. Execute each tool call (with HIL approval) ──────────────
+        //
+        // Tool tiers (VS Code-inspired, adapted for Pawz multi-capability scope):
+        //
+        //  T1 — SAFE: Read-only, zero side effects → always auto-approve
+        //  T2 — REVERSIBLE: Local writes that can be undone (files, memory, tasks) → auto-approve
+        //  T3 — EXTERNAL: Irreversible outbound actions (send email, post to Slack,
+        //        create Google docs) → require approval, offer "Always Allow"
+        //  T4 — DANGEROUS: Shell exec, financial trades, destructive ops → always prompt
+        //
         let tc_count = tool_calls.len();
         for tc in &tool_calls {
             info!("[engine] Tool call: {} id={}", tc.function.name, tc.id);
 
-            // Per-tool autonomy: auto-approve read-only/informational tools,
-            // require user approval for dangerous, side-effect-heavy, or financial tools.
-            let auto_approved_tools: &[&str] = &[
-                // ── Read-only / informational ──
+            // ─── T1: Safe — read-only / informational (always auto-approve) ───
+            let tier1_safe: &[&str] = &[
                 "fetch",
                 "read_file",
                 "list_directory",
                 "soul_read",
                 "soul_list",
                 "memory_search",
+                "memory_stats",
                 "self_info",
                 "web_search",
                 "web_read",
@@ -505,34 +513,14 @@ pub async fn run_agent_turn(
                 "web_browse",
                 "list_tasks",
                 "email_read",
-                "email_send", // redirects to google_gmail_send internally
                 "slack_read",
                 "telegram_read",
-                // ── Agent memory / profile ──
-                "soul_write",
-                "memory_store",
-                "memory_knowledge",
-                "memory_stats",
-                "update_profile",
-                // ── Task management ──
-                "create_task",
-                "manage_task",
-                // ── Google Workspace: read-only (list, read, search) ──
                 "google_gmail_list",
                 "google_gmail_read",
                 "google_calendar_list",
                 "google_drive_list",
                 "google_drive_read",
                 "google_sheets_read",
-                // ── Google Workspace: write (create docs, upload, share, send) ──
-                "google_docs_create",
-                "google_drive_upload",
-                "google_drive_share",
-                "google_gmail_send",
-                "google_calendar_create",
-                "google_sheets_append",
-                "google_api",
-                // ── Trading: read-only (balances, quotes, portfolio, info) ──
                 "sol_balance",
                 "sol_quote",
                 "sol_portfolio",
@@ -549,47 +537,64 @@ pub async fn run_agent_turn(
                 "dex_trending",
                 "coinbase_prices",
                 "coinbase_balance",
-                // ── Media ──
-                "image_generate",
-                // ── Agent Management (read/assign skills) ──
                 "agent_list",
                 "agent_skills",
-                "agent_skill_assign",
-                // ── Community Skills (safe: only fetch/install/list) ──
-                "skill_search",
-                "skill_install",
-                "skill_list",
-                // ── Inter-agent comms (safe: only sends/reads msgs between agents) ──
-                "agent_send_message",
                 "agent_read_messages",
-                // ── Squads (safe: team management) ──
-                "create_squad",
                 "list_squads",
-                "manage_squad",
-                "squad_broadcast",
-                // ── Tool RAG (safe: only searches tool index, loads tools) ──
+                "skill_search",
+                "skill_list",
                 "request_tools",
-                // ── n8n / MCP (refresh tool list — read-only discovery) ──
                 "mcp_refresh",
                 "search_ncnodes",
                 "n8n_list_workflows",
-                // ── Trello (project management — boards, lists, cards) ──
                 "trello_list_boards",
                 "trello_get_board",
+                "trello_get_lists",
+                "trello_get_cards",
+                "trello_get_card",
+                "trello_search",
+                "trello_get_labels",
+                "trello_get_members",
+            ];
+
+            // ─── T2: Reversible — local writes, can be undone (auto-approve) ───
+            let tier2_reversible: &[&str] = &[
+                "soul_write",
+                "memory_store",
+                "memory_knowledge",
+                "update_profile",
+                "create_task",
+                "manage_task",
+                "write_file",
+                "agent_skill_assign",
+                "skill_install",
+                "agent_send_message",
+                "create_squad",
+                "manage_squad",
+                "squad_broadcast",
+            ];
+
+            // ─── T3: External — irreversible outbound actions (prompt, offer Always Allow) ───
+            // These leave the user's machine — can't be undone once sent.
+            let tier3_external: &[&str] = &[
+                "email_send",
+                "google_gmail_send",
+                "google_docs_create",
+                "google_drive_upload",
+                "google_drive_share",
+                "google_calendar_create",
+                "google_sheets_append",
+                "google_api",
+                "image_generate",
                 "trello_create_board",
                 "trello_update_board",
-                "trello_get_lists",
                 "trello_create_list",
                 "trello_update_list",
                 "trello_archive_list",
-                "trello_get_cards",
                 "trello_create_card",
-                "trello_get_card",
                 "trello_update_card",
                 "trello_move_card",
                 "trello_add_comment",
-                "trello_search",
-                "trello_get_labels",
                 "trello_create_label",
                 "trello_update_label",
                 "trello_add_label",
@@ -597,11 +602,12 @@ pub async fn run_agent_turn(
                 "trello_create_checklist",
                 "trello_add_checklist_item",
                 "trello_toggle_checklist_item",
-                "trello_get_members",
             ];
 
-            // Trading write tools check the policy-based approval function
-            let trading_write_tools = [
+            // ─── T4: Dangerous — financial / destructive (always prompt) ───
+            let tier4_dangerous: &[&str] = &[
+                "exec",
+                "run_command",
                 "sol_swap",
                 "sol_transfer",
                 "sol_wallet_create",
@@ -612,6 +618,31 @@ pub async fn run_agent_turn(
                 "coinbase_transfer",
                 "coinbase_wallet_create",
             ];
+
+            // Combined auto-approve set: T1 + T2
+            let auto_approved_tools: Vec<&str> = tier1_safe.iter()
+                .chain(tier2_reversible.iter())
+                .copied()
+                .collect();
+
+            // Trading write tools check the policy-based approval function
+            let trading_write_tools = tier4_dangerous.iter()
+                .filter(|t| t.starts_with("sol_") || t.starts_with("dex_") || t.starts_with("coinbase_"))
+                .copied()
+                .collect::<Vec<&str>>();
+
+            // Determine the tier label for the tool (sent to frontend for UI hints)
+            let _tool_tier = if tier1_safe.contains(&tc.function.name.as_str()) {
+                "safe"
+            } else if tier2_reversible.contains(&tc.function.name.as_str()) {
+                "reversible"
+            } else if tier3_external.contains(&tc.function.name.as_str()) {
+                "external"
+            } else if tier4_dangerous.contains(&tc.function.name.as_str()) {
+                "dangerous"
+            } else {
+                "unknown" // MCP/dynamic tools — default to requiring approval
+            };
 
             // ── Circuit breaker: block tools that already hit HARD_STOP ──
             if let Some(count) = tool_fail_counter.get(&tc.function.name) {
@@ -682,6 +713,7 @@ pub async fn run_agent_turn(
                         session_id: session_id.to_string(),
                         run_id: run_id.to_string(),
                         tool_call: tc.clone(),
+                        tool_tier: Some(_tool_tier.to_string()),
                     },
                 );
 

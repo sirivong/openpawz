@@ -331,6 +331,7 @@ pub(crate) async fn run_orchestrator_loop(
                         session_id: session_id.to_string(),
                         run_id: run_id.to_string(),
                         tool_call: tc.clone(),
+                        tool_tier: None,
                     },
                 );
                 match tokio::time::timeout(

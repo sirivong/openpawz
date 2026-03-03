@@ -378,6 +378,167 @@
   font-size: 16px;
 }
 
+/* ─── Tier badge (shown next to modal title) ─── */
+.approval-tier-badge {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.approval-tier-badge.tier-external {
+  background: rgba(234, 179, 8, 0.15);
+  color: var(--status-warning);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+.approval-tier-badge.tier-dangerous {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--status-error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.approval-tier-badge.tier-unknown {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ─── Collapsed details (VS Code pattern) ─── */
+.approval-details-collapsible {
+  margin-top: 8px;
+}
+.approval-details-summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+  user-select: none;
+  padding: 4px 0;
+  list-style: none;
+}
+.approval-details-summary::before {
+  content: '▸ ';
+}
+.approval-details-collapsible[open] .approval-details-summary::before {
+  content: '▾ ';
+}
+.approval-details-summary:hover {
+  color: var(--text);
+}
+
+/* ─── Always Allow actions (footer bar below modal-footer) ─── */
+.approval-always-actions {
+  display: flex;
+  gap: 6px;
+  padding: 8px 24px 12px;
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.approval-always-actions .btn {
+  font-size: 11px;
+  color: var(--text-muted);
+  gap: 4px;
+}
+.approval-always-actions .btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.approval-always-actions code {
+  font-size: 10px;
+  background: var(--bg-code);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.approval-always-actions strong {
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ─── Inline chat approval bubble ─── */
+.chat-approval-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  margin: 8px 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  animation: approvalFadeIn 200ms ease-out;
+}
+@keyframes approvalFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.chat-approval-bubble.bubble-external {
+  border-left-color: var(--status-warning);
+}
+.chat-approval-bubble.bubble-dangerous {
+  border-left-color: var(--status-error);
+}
+.chat-approval-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+.chat-approval-bubble-header .ms {
+  font-size: 16px;
+}
+.chat-approval-bubble-tool {
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+}
+.chat-approval-bubble-args {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow: auto;
+  background: var(--bg-code);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  display: none;
+}
+.chat-approval-bubble-args.expanded {
+  display: block;
+}
+.chat-approval-bubble-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.chat-approval-bubble-actions .btn {
+  font-size: 12px;
+  padding: 4px 14px;
+}
+.chat-approval-bubble.resolved {
+  opacity: 0.6;
+  pointer-events: none;
+}
+.chat-approval-bubble.resolved .chat-approval-bubble-actions {
+  display: none;
+}
+.chat-approval-bubble-result {
+  font-size: 12px;
+  font-weight: 500;
+  display: none;
+}
+.chat-approval-bubble.resolved .chat-approval-bubble-result {
+  display: block;
+}
+.chat-approval-bubble-result.approved {
+  color: var(--success);
+}
+.chat-approval-bubble-result.denied {
+  color: var(--status-error);
+}
+
 /* ─── Security Settings ─── */
 .security-toggles {
   display: flex;
