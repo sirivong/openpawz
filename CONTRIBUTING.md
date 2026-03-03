@@ -38,12 +38,14 @@ Thanks for your interest in contributing! Whether you write Rust, TypeScript, do
 ```bash
 git clone https://github.com/OpenPawz/openpawz.git
 cd paw
-pnpm install
+pnpm install          # installs all deps including anime.js for UI animations
 prek install          # set up git hooks
 pnpm tauri dev
 ```
 
 This starts the Tauri dev server with hot-reload for the frontend and live-rebuild for the Rust backend.
+
+> **After pulling updates**, always re-run `pnpm install` to pick up any new dependencies before building.
 
 ### Verifying Changes
 
