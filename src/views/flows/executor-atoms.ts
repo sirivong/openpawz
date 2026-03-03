@@ -132,6 +132,10 @@ export interface FlowRunState {
   variables: Record<string, unknown>;
   /** Pre-loaded vault credentials (name → decrypted value) */
   vaultCredentials: Record<string, string>;
+  /** Pre-recalled memory context for agent nodes (secure, per-agent). */
+  memoryContext: string;
+  /** Per-cell memory contexts for tesseract flows (cellId → context). */
+  cellMemoryContexts: Map<string, string>;
   /** Accumulated output log */
   outputLog: FlowOutputEntry[];
   /** Start time */
@@ -282,13 +286,22 @@ export function collectNodeInput(
 /**
  * Build the prompt to send to an agent for a given node.
  * Combines the node's configured prompt with upstream data.
+ * When `memoryContext` is provided, relevant long-term memories
+ * are injected so agent nodes benefit from recall even without
+ * an explicit memory-recall step in the flow.
  */
 export function buildNodePrompt(
   node: FlowNode,
   upstreamInput: string,
   config: NodeExecConfig,
+  memoryContext?: string,
 ): string {
   const parts: string[] = [];
+
+  // Inject pre-recalled memory context (secure, per-agent)
+  if (memoryContext) {
+    parts.push(`[Relevant Memory]\n${memoryContext}`);
+  }
 
   // Context from upstream
   if (upstreamInput) {
@@ -433,6 +446,8 @@ export function createFlowRunState(
     nodeStates: new Map(),
     variables: { ...(initialVars ?? {}) },
     vaultCredentials: { ...(vaultCredentials ?? {}) },
+    memoryContext: '',
+    cellMemoryContexts: new Map(),
     outputLog: [],
     startedAt: 0,
     finishedAt: 0,

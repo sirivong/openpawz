@@ -454,8 +454,17 @@ OpenPawz was designed from the ground up with a **zero-trust, local-first securi
 **Unique to OpenPawz.** A drag-and-drop visual workflow engine for building multi-step AI pipelines. Wire together integrations — triggers, agents, tools, conditions, code, data transforms, and outputs — on an SVG canvas with real-time execution feedback.
 
 <Columns cols={2}>
-  <Card title="9 integration types">
-    Trigger, Agent, Tool, Condition, Data, Code, Output, Error, and Group. Each has its own icon, color, and configuration panel.
+  <Card title="10 integration types">
+    Trigger, Agent, Tool, Condition, Data, Code, Output, Error, Group, and **Event Horizon** (tesseract synchronization barrier). Each has its own icon, color, and configuration panel.
+  </Card>
+  <Card title="Conductor Protocol">
+    **Unique to OpenPawz.** Automatic graph optimization that detects parallelism, collapses sequences, and compiles execution strategies — 5 primitives including Tesseract for 4D cell-based orchestration.
+  </Card>
+  <Card title="Tesseract flows">
+    **Unique to OpenPawz.** Partition complex graphs into independent cells that execute in parallel, synchronized at event horizons. Per-cell memory isolation, per-cell timeouts, and graceful degradation.
+  </Card>
+  <Card title="Flow memory integration">
+    Agent nodes automatically receive relevant long-term memories from Engram. In tesseract flows, each cell gets its own scoped memory context — no shared-state races.
   </Card>
   <Card title="Text-to-flow">
     Type a natural-language description — `webhook → agent → send email` — and the parser builds the flow automatically with correct integration types and edges.
@@ -465,6 +474,9 @@ OpenPawz was designed from the ground up with a **zero-trust, local-first securi
   </Card>
   <Card title="Code integrations">
     Run sandboxed JavaScript inline. Access `input` from the previous step and `context` for flow metadata. Return values flow downstream.
+  </Card>
+  <Card title="4 edge types">
+    Forward, Reverse, Bidirectional, and Error edges control data flow direction. Wire complex handshakes and fallback paths on the canvas.
   </Card>
   <Card title="Templates">
     30+ pre-built flow patterns across 10 categories — AI, Communication, DevOps, Productivity, Data, Research, Social, Finance, Support, and Custom.
@@ -551,8 +563,8 @@ Not a toy integration — a complete email client. IMAP/SMTP via himalaya bridge
   <Card title="Zero-framework frontend">
     Vanilla TypeScript with atomic design (atoms → molecules → organisms). No React, no Vue, no Angular. Minimal bundle, maximum performance.
   </Card>
-  <Card title="530 automated tests">
-    164 Rust + 366 TypeScript tests covering all critical paths. 3-job CI pipeline (Rust + TypeScript + Security Audit) on every push.
+  <Card title="2,816 automated tests">
+    650 Rust + 2,166 TypeScript tests covering all critical paths including the Conductor Protocol, tesseract flows, and memory integration. 3-job CI pipeline (Rust + TypeScript + Security Audit) on every push.
   </Card>
   <Card title="Zero known CVEs">
     `cargo audit` + `npm audit` enforced in CI. Zero Clippy warnings. Dependabot for automated dependency updates.
@@ -582,7 +594,7 @@ Not a toy integration — a complete email client. IMAP/SMTP via himalaya bridge
 | **Voice (TTS/STT)** | 3 providers | None | None | None | None |
 | **Extension marketplace** | 3 tiers + PawzHub | None | Plugin store | None | LangSmith |
 | **Self-installing skills** | Agents install their own | No | No | No | No |
-| **Visual flow builder** | Built-in (9 integration types, debug, templates) | No | No | No | LangGraph Studio |
+| **Visual flow builder** | Built-in (10 types, Conductor Protocol, Tesseract, debug, templates) | No | No | No | LangGraph Studio |
 | **Session compaction** | Automatic, 40–60% savings | No | No | No | No |
 | **Daily budget caps** | Built-in USD cap | No | No | No | No |
 | **Security audit trail** | Full + export | Basic | None | None | None |

@@ -475,6 +475,45 @@ Outbound network commands are audited for data exfiltration patterns:
 Exfiltration detection is pattern-based and applies to `exec` tool invocations. It supplements — but does not replace — the container sandbox for high-security environments.
 :::
 
+## Flow execution security
+
+The visual flow builder executes agent pipelines with multiple isolation and safety mechanisms.
+
+### Memory scoping
+
+Flow memory queries are **agent-scoped** — the `agentId` is passed to every `pawEngine.memorySearch()` call. Results are **score-filtered** at ≥ 0.3 to prevent low-relevance noise from entering agent prompts. In tesseract flows, each parallel cell receives its own resolved memory context via an immutable map — no shared-state mutation between cells.
+
+### Cell isolation in tesseract flows
+
+Each tesseract cell executes in its own `ConductorDeps` wrapper:
+
+| Isolation | Detail |
+|-----------|--------|
+| **Memory** | Per-cell `memoryContextOverride` — cells cannot read or mutate each other's memory context |
+| **Timeout** | Per-cell `Promise.race` with `DEFAULT_CELL_TIMEOUT_MS` (5 min, configurable) — one stalled cell cannot block the flow |
+| **Abort** | `deps.isAborted()` checked at the top of each cell task — flow cancellation propagates immediately |
+| **Output** | `findCellSinkNode` determines each cell's output node by topology, not insertion order — robust against graph mutations |
+| **Error** | Cell failures are caught and recorded as `[Cell error: ...]` outputs — the event horizon proceeds with partial data rather than crashing |
+
+### Timeout protection
+
+The per-cell timeout prevents resource exhaustion:
+
+```
+Promise.race([
+  executeCellNodes(cell, ...),
+  new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Cell timeout')), cellTimeoutMs)
+  )
+])
+```
+
+The timer is cleared immediately after the race resolves to prevent timer leaks in long-lived processes.
+
+### Circular import prevention
+
+The flow engine prevents circular module dependencies between `conductor-atoms.ts` and `conductor-tesseract.ts` using type-only imports (erased at compile time) and a `compileSubgraph?` callback injection pattern. This ensures the module graph has no runtime cycles.
+
 ## Budget enforcement
 
 Daily spending limits with progressive warnings:

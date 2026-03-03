@@ -129,7 +129,7 @@ Architect (Cloud LLM): "Send hello to #general" → calls mcp_slack_send_message
 
 **Problem:** Every workflow platform — n8n, Zapier, Make, Airflow — walks the graph node by node: sequential, synchronous, one LLM call per agent step. A 10-node AI pipeline with 6 agent steps takes 24+ seconds and 6 LLM calls. Cycles (feedback loops, agent debates) are structurally impossible — all require DAGs.
 
-**Solution:** The Conductor treats flow graphs as **blueprints of intent** and compiles them into optimized execution strategies before a single node runs. Four primitives — Collapse (merge N agents → 1 LLM call), Extract (deterministic nodes bypass LLM entirely), Parallelize (independent branches run concurrently), and Converge (cyclic subgraphs iterate until outputs stabilize) — reduce a 10-node flow from 24s/6 calls to 4–8s/2–3 calls.
+**Solution:** The Conductor treats flow graphs as **blueprints of intent** and compiles them into optimized execution strategies before a single node runs. Five primitives — Collapse (merge N agents → 1 LLM call), Extract (deterministic nodes bypass LLM entirely), Parallelize (independent branches run concurrently), Converge (cyclic subgraphs iterate until outputs stabilize), and Tesseract (partition graphs into parallel cells with per-cell memory isolation, synchronized at event horizons) — reduce a 10-node flow from 24s/6 calls to 4–8s/2–3 calls.
 
 ```
 10-node flow, 6 agent steps:
@@ -163,7 +163,7 @@ OpenPawz takes a defense-in-depth approach with 10 security layers. The agent ne
 |--------|-------|
 | Open network ports | **0** — Tauri IPC only, no HTTP server |
 | Credential encryption | **AES-256-GCM** with OS keychain key storage |
-| Automated tests | **530** (164 Rust + 366 TypeScript) |
+| Automated tests | **2,816** (650 Rust + 2,166 TypeScript) |
 | CI security checks | `cargo audit` + `npm audit` on every push |
 | Known CVEs | **0** enforced in CI |
 | Clippy warnings | **0** enforced via `-D warnings` |
@@ -611,10 +611,10 @@ OpenPawz stores all credentials in an AES-256-GCM encrypted vault backed by your
 ### Run Tests
 
 ```bash
-# TypeScript tests (360 tests)
+# TypeScript tests (2,166 tests)
 npx vitest run
 
-# Rust tests (242 tests)
+# Rust tests (650 tests)
 cd src-tauri && cargo test
 
 # TypeScript type-check

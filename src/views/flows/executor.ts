@@ -164,11 +164,52 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
       }
     }
 
+    // ── Pre-recall memory context for secure agent augmentation ────────
+    // Query the Engram memory system for context relevant to this flow.
+    // This gives agent nodes access to relevant long-term memories even when
+    // there's no explicit memory-recall node in the flow, and without
+    // requiring an active chat session.
+    let memoryContext = '';
+    try {
+      // Build a search query from the flow's description, name, and agent prompts
+      const memoryQueryParts = [graph.name];
+      if (graph.description) memoryQueryParts.push(graph.description);
+      // Sample agent prompts for intent context (up to 3)
+      const agentNodes = graph.nodes.filter((n) => n.kind === 'agent');
+      for (const an of agentNodes.slice(0, 3)) {
+        const cfg = getNodeExecConfig(an);
+        if (cfg.prompt) memoryQueryParts.push(cfg.prompt.slice(0, 200));
+      }
+      const memoryQuery = memoryQueryParts.join(' ').slice(0, 500);
+
+      // Resolve the primary agent for scoped memory access
+      const primaryAgentId = graph.nodes.find((n) => n.kind === 'agent')?.config?.agentId as
+        | string
+        | undefined;
+
+      if (memoryQuery.trim()) {
+        const results = await pawEngine.memorySearch(memoryQuery, 5, primaryAgentId);
+        if (results && results.length > 0) {
+          memoryContext = results
+            .filter((m: { score?: number }) => (m.score ?? 1) >= 0.3)
+            .map(
+              (m: { content: string; category?: string }, i: number) =>
+                `${i + 1}. [${m.category ?? 'memory'}] ${m.content}`,
+            )
+            .join('\n');
+        }
+      }
+    } catch {
+      // Memory pre-recall is best-effort — don't block flow execution
+    }
+
     _runState = createFlowRunState(graph.id, plan, graph.variables, vaultCreds);
+    _runState.memoryContext = memoryContext;
     _aborted = false;
     _paused = false;
     _running = true;
     _skipNodes = new Set();
+    _edgeValues.clear();
 
     _runState.startedAt = Date.now();
     _runState.status = 'running';
@@ -302,6 +343,24 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
       executeNode,
       executeAgentStep,
       recordEdgeValues,
+      /** Resolve long-term memory for a query — used by tesseract cell-scoped memory. */
+      searchMemory: async (query: string, agentId?: string): Promise<string> => {
+        try {
+          const results = await pawEngine.memorySearch(query, 5, agentId);
+          if (results && results.length > 0) {
+            return results
+              .filter((m: { score?: number }) => (m.score ?? 1) >= 0.3)
+              .map(
+                (m: { content: string; category?: string }, i: number) =>
+                  `${i + 1}. [${m.category ?? 'memory'}] ${m.content}`,
+              )
+              .join('\n');
+          }
+        } catch {
+          // Memory search is best-effort
+        }
+        return '';
+      },
     };
   }
 
@@ -317,6 +376,7 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
     graph: FlowGraph,
     node: FlowNode,
     defaultAgentId?: string,
+    memoryContextOverride?: string,
   ): Promise<void> {
     if (!_runState) return;
 
@@ -372,7 +432,14 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
 
         case 'condition':
           // Condition nodes ask the agent to evaluate, then route
-          output = await executeAgentStep(graph, node, upstreamInput, config, defaultAgentId);
+          output = await executeAgentStep(
+            graph,
+            node,
+            upstreamInput,
+            config,
+            defaultAgentId,
+            memoryContextOverride,
+          );
           handleConditionResult(graph, node, output);
           break;
 
@@ -419,7 +486,14 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
         case 'data':
         default:
           // Agent/tool/data nodes send prompts to the engine
-          output = await executeAgentStep(graph, node, upstreamInput, config, defaultAgentId);
+          output = await executeAgentStep(
+            graph,
+            node,
+            upstreamInput,
+            config,
+            defaultAgentId,
+            memoryContextOverride,
+          );
           break;
 
         case 'http' as FlowNode['kind']:
@@ -449,7 +523,9 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
               getRunState: () => _runState,
               skipNodes: _skipNodes,
               onEvent: callbacks.onEvent,
-              executeAgentStep,
+              executeAgentStep: memoryContextOverride
+                ? (g, n, i, c, aid?) => executeAgentStep(g, n, i, c, aid, memoryContextOverride)
+                : executeAgentStep,
             },
             graph,
             node,
@@ -477,6 +553,14 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
         case 'memory-recall' as FlowNode['kind']:
           // Memory-recall nodes: search/retrieve from long-term memory
           output = await executeMemoryRecall(node, upstreamInput, config, handlerReporter());
+          break;
+
+        case 'event-horizon':
+          // Event-horizon nodes: hard sync barriers in Tesseract flows.
+          // All upstream cells must complete before crossing the horizon.
+          // The node itself is a passthrough — the merge semantics are
+          // handled at the strategy level by executeTesseractUnit().
+          output = upstreamInput || '';
           break;
       }
 
@@ -554,6 +638,7 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
                   retryInput,
                   config,
                   defaultAgentId,
+                  memoryContextOverride,
                 );
                 break;
             }
@@ -668,9 +753,11 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
     upstreamInput: string,
     config: NodeExecConfig,
     defaultAgentId?: string,
+    memoryContextOverride?: string,
   ): Promise<string> {
     const agentId = config.agentId || defaultAgentId || 'default';
-    const prompt = buildNodePrompt(node, upstreamInput, config);
+    const memCtx = memoryContextOverride ?? _runState?.memoryContext;
+    const prompt = buildNodePrompt(node, upstreamInput, config, memCtx);
 
     // Use a dedicated session key for this flow run + node
     const sessionKey = `flow_${_runState!.runId}_${node.id}`;
@@ -770,7 +857,7 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
         }
 
         // Timeout guard — only safety net, not the primary completion path
-        setTimeout(() => {
+        const timeoutHandle = setTimeout(() => {
           if (!streamSettled) {
             streamSettled = true;
             if (accumulated.length > 0) {
@@ -782,6 +869,18 @@ export function createFlowExecutor(callbacks: FlowExecutorCallbacks): FlowExecut
             }
           }
         }, timeout);
+
+        // Wrap resolve/reject to clear the timer when stream completes first
+        const origResolve = streamResolve;
+        const origReject = streamReject;
+        streamResolve = () => {
+          clearTimeout(timeoutHandle);
+          origResolve?.();
+        };
+        streamReject = (err: Error) => {
+          clearTimeout(timeoutHandle);
+          origReject?.(err);
+        };
       });
 
       // Clean up the temporary session

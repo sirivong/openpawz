@@ -42,6 +42,7 @@ import {
   type ExecutionStrategy,
   type ExecutionUnit,
 } from '../conductor-atoms';
+import { mergeAtHorizon, findCellSinkNode } from '../conductor-tesseract';
 
 import {
   type SimScenario,
@@ -939,6 +940,167 @@ async function executeConductorUnitSim(
         await executeNode(node);
       }
       break;
+
+    case 'tesseract':
+      await executeTesseractUnitSim(
+        unit,
+        graph,
+        nodeMap,
+        skipNodes,
+        runState,
+        onEvent,
+        executeNode,
+        mockAgentStep,
+        callCounts,
+        mocks,
+        mockCalls,
+      );
+      break;
+  }
+}
+
+// ── Tesseract Unit Execution (Simulated) ─────────────────────────────────
+
+async function executeTesseractUnitSim(
+  unit: ExecutionUnit,
+  graph: FlowGraph,
+  nodeMap: Map<string, FlowNode>,
+  skipNodes: Set<string>,
+  runState: FlowRunState,
+  onEvent: (event: FlowExecEvent) => void,
+  executeNode: (node: FlowNode, agentId?: string) => Promise<void>,
+  mockAgentStep: (
+    node: FlowNode,
+    input: string,
+    config: NodeExecConfig,
+    agentId: string,
+  ) => Promise<string>,
+  callCounts: Map<string, number>,
+  mocks: SimMockConfig,
+  mockCalls: MockCallLog[],
+): Promise<void> {
+  const ts = unit.tesseractStrategy;
+  if (!ts) {
+    // Fallback: run all nodes in unit sequentially
+    for (const nodeId of unit.nodeIds) {
+      if (skipNodes.has(nodeId)) continue;
+      const node = nodeMap.get(nodeId);
+      if (node) await executeNode(node);
+    }
+    return;
+  }
+
+  /** Maps cellId → latest output from that cell. */
+  const cellOutputs = new Map<string, string>();
+
+  for (const step of ts.executionOrder) {
+    if (step.kind === 'cells') {
+      // Execute all cells in this group in parallel
+      const cellTasks = step.cellIds.map(async (cellId) => {
+        const cell = ts.cells.find((c) => c.id === cellId);
+        if (!cell) return;
+
+        // Run each node in this cell's strategy sequentially through executeNode
+        for (const phase of cell.strategy.phases) {
+          for (const u of phase.units) {
+            // Dispatch sub-unit in the simulation
+            await executeConductorUnitSim(
+              u,
+              graph,
+              nodeMap,
+              skipNodes,
+              runState,
+              onEvent,
+              executeNode,
+              mockAgentStep,
+              callCounts,
+              mocks,
+              mockCalls,
+            );
+          }
+        }
+
+        // Collect the cell's final output from the sink node
+        const sinkNodeId = findCellSinkNode(cell, graph);
+        const lastState = runState.nodeStates.get(sinkNodeId);
+        cellOutputs.set(cellId, lastState?.output ?? '');
+      });
+
+      await Promise.all(cellTasks);
+    } else {
+      // step.kind === 'horizon'
+      const horizon = ts.horizons.find((h) => h.id === step.horizonId);
+      if (!horizon) continue;
+
+      const horizonNode = nodeMap.get(horizon.id);
+
+      // Collect feeding cell outputs
+      const feedingOutputMap = new Map<string, string>();
+      for (const cellId of horizon.cellIds) {
+        const output = cellOutputs.get(cellId);
+        if (output) feedingOutputMap.set(cellId, output);
+      }
+
+      // Emit step-start for execution-order tracking
+      onEvent({
+        type: 'step-start',
+        runId: runState.runId,
+        stepIndex: runState.currentStep,
+        nodeId: horizon.id,
+        nodeLabel: horizonNode?.label ?? 'Event Horizon',
+        nodeKind: 'event-horizon',
+      });
+
+      // Apply merge policy
+      let mergedOutput: string;
+      if (horizon.mergePolicy === 'synthesize' && feedingOutputMap.size > 0) {
+        const synthPrompt = mergeAtHorizon(feedingOutputMap, 'synthesize');
+        if (horizonNode) {
+          const config = getNodeExecConfig(horizonNode);
+          mergedOutput = await mockAgentStep(
+            horizonNode,
+            synthPrompt,
+            { ...config, prompt: synthPrompt },
+            'default',
+          );
+        } else {
+          mergedOutput = mergeAtHorizon(feedingOutputMap, 'concat');
+        }
+      } else {
+        mergedOutput = mergeAtHorizon(feedingOutputMap, horizon.mergePolicy);
+      }
+
+      // Record state for the horizon node
+      const nodeState = createNodeRunState(horizon.id);
+      nodeState.output = mergedOutput;
+      nodeState.status = 'success';
+      nodeState.startedAt = Date.now();
+      nodeState.finishedAt = Date.now();
+      nodeState.durationMs = 0;
+      runState.nodeStates.set(horizon.id, nodeState);
+
+      if (horizonNode) {
+        horizonNode.status = 'success';
+      }
+
+      onEvent({
+        type: 'step-complete',
+        runId: runState.runId,
+        nodeId: horizon.id,
+        output: mergedOutput.slice(0, 200),
+        durationMs: 0,
+      });
+
+      runState.outputLog.push({
+        nodeId: horizon.id,
+        nodeLabel: horizonNode?.label ?? 'Event Horizon',
+        nodeKind: 'event-horizon',
+        status: 'success',
+        output: mergedOutput,
+        durationMs: 0,
+        timestamp: Date.now(),
+      });
+    }
   }
 }
 

@@ -125,6 +125,19 @@ Atomic design pattern — each feature has `atoms.ts` (data/state), `molecules.t
 | `session-compaction` | Session summarization |
 | `slash-commands` | Chat slash command definitions |
 
+### Flow engine (`src/views/flows/`)
+
+The visual workflow builder has its own execution engine built on the Conductor Protocol — an optimizer that detects parallelism, convergence, and higher-dimensional structures in flow graphs.
+
+| Module | Purpose |
+|--------|---------|
+| `executor.ts` | Main flow executor — graph traversal, memory pre-recall, agent step dispatch |
+| `executor-conductor.ts` | Conductor Protocol runtime — parallel execution, tesseract cell dispatch, per-cell memory isolation |
+| `executor-atoms.ts` | Shared flow types — `FlowRunState`, `buildNodePrompt()`, `cellMemoryContexts` |
+| `conductor-atoms.ts` | Conductor types — `ExecutionUnit`, `ExecutionStrategy`, strategy compilation, `shouldUseConductor()` detection |
+| `conductor-tesseract.ts` | Tesseract primitive — cell detection, BFS depth, subgraph building, `findCellSinkNode`, `mergeAtHorizon` |
+| `simulation-runtime.ts` | Simulation mirror of the production executor for debug / dry-run mode |
+
 ### IPC bridge (`src/engine-bridge.ts`)
 
 All communication with the Rust backend goes through Tauri's `invoke()` and event system. The bridge provides typed wrappers for every engine command.
