@@ -22,6 +22,17 @@ export function updateIntegrationsHeroStats(connected: ConnectedService[]): void
     const total = connected.reduce((sum, c) => sum + (c.toolCount ?? 0), 0);
     toolsEl.textContent = String(total);
   }
+
+  // Wire the Connected stat as a clickable element that shows the drawer.
+  // Uses a data attribute guard to avoid duplicate listeners.
+  const connectedStat = connectedEl?.closest('.integrations-hero-stat') as HTMLElement | null;
+  if (connectedStat && !connectedStat.dataset.drawerWired) {
+    connectedStat.dataset.drawerWired = '1';
+    connectedStat.style.cursor = 'pointer';
+    connectedStat.addEventListener('click', () => {
+      document.dispatchEvent(new CustomEvent('integrations:show-connected-drawer'));
+    });
+  }
 }
 
 // ── Connection Health List ─────────────────────────────────────────────
