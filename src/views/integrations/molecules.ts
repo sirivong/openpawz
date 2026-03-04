@@ -685,7 +685,7 @@ function _renderCards(): void {
               ${
                 isConnected
                   ? `<button class="btn btn-ghost btn-sm integrations-connect-btn" data-service-id="${s.id}">Edit</button>`
-                  : `<button class="btn btn-ghost btn-sm integrations-connect-btn" data-service-id="${s.id}">Setup</button>`
+                  : `<button class="btn btn-ghost btn-sm integrations-connect-btn" data-service-id="${s.id}">${s.authType === 'oauth' ? 'Connect' : 'Setup'}</button>`
               }
             </div>
           </div>`;
@@ -1350,18 +1350,27 @@ function _wireEvents(): void {
     });
   });
 
-  // Card clicks → detail (or connect button → guide)
+  // Card clicks → detail (or connect button → guide/OAuth)
   document.getElementById('integrations-grid')?.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
 
-    // If user clicked the "Connect" button directly, open the guide
+    // If user clicked the "Connect" / "Setup" button directly, route by authType
     const connectBtn = target.closest('.integrations-connect-btn') as HTMLElement;
     if (connectBtn) {
       const sid = connectBtn.dataset.serviceId;
       const service = SERVICE_CATALOG.find((s) => s.id === sid);
       if (service) {
         _state.setSelectedService(service);
-        _openGuide(service);
+        if (service.authType === 'oauth') {
+          // Show the detail panel which has the OAuth connect button
+          _renderDetail(service);
+        } else if (service.authType === 'n8n-oauth') {
+          _renderDetail(service);
+        } else if (service.authType === 'rfc7591') {
+          _renderDetail(service);
+        } else {
+          _openGuide(service);
+        }
       }
       return;
     }
