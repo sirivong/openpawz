@@ -191,6 +191,19 @@ function _renderServicesTab(tabBody: HTMLElement): void {
   _renderBuiltInSection(tabBody);
   _renderCards();
   _wireEvents();
+
+  // If a service was pre-selected (e.g. from the Connected drawer), auto-open its detail
+  const pending = _state.getSelectedService();
+  if (pending) {
+    const isConnected = _state.getConnected().some((c) => c.serviceId === pending.id);
+    if (isConnected) {
+      _renderConnectedDetail(pending);
+    } else {
+      _renderDetail(pending);
+    }
+    // Clear the selection so subsequent re-renders don't re-open the panel
+    _state.setSelectedService(null);
+  }
 }
 
 // ── Active integrations section (MCP servers) ──
@@ -424,7 +437,7 @@ function _renderBuiltInSection(tabBody: HTMLElement): void {
         <span class="ms ms-sm">expand_more</span>
       </button>
     </div>
-    <div class="builtin-categories" id="builtin-categories">${categoriesHtml}</div>
+    <div class="builtin-categories builtin-collapsed" id="builtin-categories">${categoriesHtml}</div>
   `;
 
   // Insert after MCP section (before toolbar), or before toolbar directly
@@ -894,6 +907,185 @@ function _renderDetail(service: ServiceDefinition): void {
   _renderCommunityBanner(service);
 }
 
+// ── Connected service detail (Edit view) ─────────────────────────────
+
+/**
+ * Render a detail panel for a connected service showing stored credentials,
+ * connection URL, test button, and management actions. Mirrors the Dashboard's
+ * "Jira — Connection" view.
+ */
+async function _renderConnectedDetail(service: ServiceDefinition): Promise<void> {
+  const panel = document.getElementById('integrations-detail');
+  if (!panel) return;
+
+  const conn = _state.getConnected().find((c) => c.serviceId === service.id);
+
+  panel.style.display = 'block';
+  panel.innerHTML = `
+    <div class="integrations-detail-header">
+      <button class="btn btn-ghost btn-sm integrations-detail-close" id="detail-close">
+        <span class="ms">close</span>
+      </button>
+      <div class="integrations-detail-icon" style="background: ${service.color}15; color: ${service.color}">
+        <span class="ms ms-lg">${service.icon}</span>
+      </div>
+      <h2>${escHtml(service.name)} — Connection</h2>
+      <span class="integrations-card-cat">${categoryLabel(service.category)}</span>
+      <span class="integrations-status connected"><span class="ms ms-sm">check_circle</span> Connected${conn ? ` · ${conn.toolCount ?? 0} tools` : ''}</span>
+    </div>
+    <div class="integrations-detail-section" id="connected-creds-section">
+      <div style="font-size:13px;color:var(--text-secondary);display:flex;align-items:center;gap:6px;padding:8px 0">
+        <span class="ms ms-sm" style="animation:spin 1s linear infinite">sync</span> Loading credentials…
+      </div>
+    </div>
+  `;
+
+  // Wire close
+  document.getElementById('detail-close')?.addEventListener('click', () => {
+    panel.style.display = 'none';
+    _state.setSelectedService(null);
+  });
+
+  // Fetch stored credentials
+  let creds: Record<string, string> = {};
+  try {
+    creds = await invoke<Record<string, string>>('engine_integrations_get_credentials', {
+      serviceId: service.id,
+    });
+  } catch {
+    /* no creds stored */
+  }
+
+  // Derive connection URL
+  const domain = creds.domain || creds.url || creds.base_url || '';
+  let urlValue = '';
+  if (domain) {
+    const base = domain.startsWith('http') ? domain : `https://${domain}`;
+    if (service.id === 'jira') {
+      urlValue = `${base.replace(/\/$/, '')}/rest/api/3`;
+    } else {
+      urlValue = base;
+    }
+  }
+
+  const hasCreds = Object.keys(creds).length > 0;
+
+  // Build masked credential rows
+  const credRows = Object.entries(creds)
+    .map(([key, val]) => {
+      const isSensitive =
+        key.toLowerCase().includes('token') ||
+        key.toLowerCase().includes('secret') ||
+        key.toLowerCase().includes('key') ||
+        key.toLowerCase().includes('password');
+      const masked = isSensitive && val ? `••••••••${val.slice(-4)}` : val || '(empty)';
+      const label = key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+      return `
+        <div class="svc-detail-conn-row" style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+          <span style="color:var(--text-secondary);font-size:13px">${escHtml(label)}</span>
+          <span style="font-family:var(--font-mono);font-size:13px">${escHtml(masked)}</span>
+        </div>`;
+    })
+    .join('');
+
+  const credsSection = document.getElementById('connected-creds-section');
+  if (!credsSection) return;
+
+  credsSection.innerHTML = `
+    ${
+      urlValue
+        ? `
+      <div style="background:rgba(var(--accent-rgb,99,102,241),0.08);border:1px solid rgba(var(--accent-rgb,99,102,241),0.2);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <span class="ms ms-sm" style="color:var(--accent)">link</span>
+        <span style="font-size:13px;color:var(--text-secondary)">Connected URL</span>
+        <code style="font-size:12px;color:var(--accent);flex:1;text-align:right">${escHtml(urlValue)}</code>
+      </div>`
+        : ''
+    }
+
+    ${
+      hasCreds
+        ? `
+      <h3 style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+        <span class="ms ms-sm">key</span> Stored Credentials
+      </h3>
+      ${credRows}
+    `
+        : `
+      <div style="font-size:13px;color:var(--warning);display:flex;align-items:center;gap:6px;padding:8px 0">
+        <span class="ms" style="font-size:16px">warning</span>
+        No credentials found. Please reconfigure this integration.
+      </div>
+    `
+    }
+
+    <div style="display:flex;gap:8px;margin-top:16px">
+      <button class="btn btn-primary btn-sm" id="connected-test-btn">
+        <span class="ms ms-sm">speed</span> Test Connection
+      </button>
+      <button class="btn btn-ghost btn-sm" id="connected-reconfigure-btn">
+        <span class="ms ms-sm">tune</span> Reconfigure
+      </button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--danger,#ef4444)" id="connected-disconnect-btn">
+        <span class="ms ms-sm">link_off</span> Disconnect
+      </button>
+    </div>
+    <div id="connected-test-result" style="display:none;margin-top:12px"></div>
+  `;
+
+  // Wire test button
+  document.getElementById('connected-test-btn')?.addEventListener('click', async () => {
+    const resultEl = document.getElementById('connected-test-result');
+    const testBtn = document.getElementById('connected-test-btn') as HTMLButtonElement;
+    if (!resultEl || !testBtn) return;
+
+    testBtn.disabled = true;
+    testBtn.innerHTML =
+      '<span class="ms ms-sm" style="animation:spin 1s linear infinite">sync</span> Testing…';
+    resultEl.style.display = 'block';
+    resultEl.innerHTML =
+      '<span style="font-size:13px;color:var(--text-secondary)">Testing connection…</span>';
+
+    try {
+      const result = await invoke<{ success: boolean; message: string; details?: string }>(
+        'engine_integrations_test_credentials',
+        { serviceId: service.id, nodeType: service.n8nNodeType, credentials: creds },
+      );
+      if (result.success) {
+        resultEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;color:var(--success,#22c55e);font-size:13px">
+          <span class="ms ms-sm">check_circle</span> ${escHtml(result.message)}${result.details ? ` — ${escHtml(result.details)}` : ''}
+        </div>`;
+      } else {
+        resultEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;color:var(--danger,#ef4444);font-size:13px">
+          <span class="ms ms-sm">error</span> ${escHtml(result.message)}${result.details ? ` — ${escHtml(result.details)}` : ''}
+        </div>`;
+      }
+    } catch (e) {
+      resultEl.innerHTML = `<div style="color:var(--danger,#ef4444);font-size:13px"><span class="ms ms-sm">error</span> Test failed: ${escHtml(String(e))}</div>`;
+    }
+    testBtn.disabled = false;
+    testBtn.innerHTML = '<span class="ms ms-sm">speed</span> Test Connection';
+  });
+
+  // Wire reconfigure → re-open setup guide
+  document.getElementById('connected-reconfigure-btn')?.addEventListener('click', () => {
+    _openGuide(service);
+  });
+
+  // Wire disconnect
+  document.getElementById('connected-disconnect-btn')?.addEventListener('click', async () => {
+    try {
+      await invoke('engine_integrations_disconnect', { serviceId: service.id });
+      showToast(`${service.name} disconnected`, 'info');
+      panel.style.display = 'none';
+      _state.setSelectedService(null);
+      refreshConnected();
+    } catch (e) {
+      showToast(`Disconnect failed: ${e}`, 'error');
+    }
+  });
+}
+
 // ── Community package banner in detail panel ─────────────────────────
 
 async function _renderCommunityBanner(service: ServiceDefinition): Promise<void> {
@@ -1361,7 +1553,13 @@ function _wireEvents(): void {
       const service = SERVICE_CATALOG.find((s) => s.id === sid);
       if (service) {
         _state.setSelectedService(service);
-        if (service.authType === 'oauth') {
+
+        // Connected services always go to the connection detail (Edit view),
+        // regardless of auth type — shows stored creds, test, disconnect.
+        const isConnected = _state.getConnected().some((c) => c.serviceId === sid);
+        if (isConnected) {
+          _renderConnectedDetail(service);
+        } else if (service.authType === 'oauth') {
           // Show the detail panel which has the OAuth connect button
           _renderDetail(service);
         } else if (service.authType === 'n8n-oauth') {
@@ -1369,6 +1567,7 @@ function _wireEvents(): void {
         } else if (service.authType === 'rfc7591') {
           _renderDetail(service);
         } else {
+          // Not connected, API key → open setup guide
           _openGuide(service);
         }
       }

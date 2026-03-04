@@ -2705,6 +2705,10 @@ pub async fn engine_integrations_test_credentials(
     node_type: String,
     credentials: std::collections::HashMap<String, String>,
 ) -> Result<CredentialTestResult, String> {
+    info!(
+        "[test-credentials] Testing connection for service '{}' (node: {})",
+        service_id, node_type
+    );
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -2889,6 +2893,25 @@ pub async fn engine_integrations_test_credentials(
             })
         }
     };
+
+    match &result {
+        Ok(r) => {
+            if r.success {
+                info!("[test-credentials] '{}' — OK: {}", service_id, r.message);
+            } else {
+                warn!(
+                    "[test-credentials] '{}' — FAILED: {}{}",
+                    service_id,
+                    r.message,
+                    r.details
+                        .as_deref()
+                        .map(|d| format!(" ({})", d))
+                        .unwrap_or_default()
+                );
+            }
+        }
+        Err(e) => warn!("[test-credentials] '{}' — error: {}", service_id, e),
+    }
 
     result.map_err(|e| e.to_string())
 }
@@ -3262,7 +3285,17 @@ pub fn engine_integrations_provision(
     let vault_key =
         skills::get_vault_key().map_err(|e| format!("Failed to get vault key: {}", e))?;
 
-    // 4. Write each credential to the skill vault (encrypted)
+    // 4. Clear any existing (possibly corrupted) vault entries for this skill
+    //    before writing new ones. This prevents stale/corrupted keys from
+    //    breaking decryption after re-provisioning.
+    if let Err(e) = state.store.delete_all_skill_credentials(&skill_id) {
+        warn!(
+            "[provision] Failed to clear old vault entries for skill '{}': {} — continuing anyway",
+            skill_id, e
+        );
+    }
+
+    // 5. Write each credential to the skill vault (encrypted)
     for (key, value) in &mapped_creds {
         let encrypted = skills::encrypt_credential(value, &vault_key);
         state
@@ -3276,7 +3309,7 @@ pub fn engine_integrations_provision(
             })?;
     }
 
-    // 5. Auto-enable the skill
+    // 6. Auto-enable the skill
     state
         .store
         .set_skill_enabled(&skill_id, true)
@@ -3516,6 +3549,24 @@ pub(crate) fn map_integration_to_skill(
     };
 
     (skill_id.to_string(), mapped)
+}
+
+/// Map a service_id to its corresponding skill_id without needing credentials.
+/// Used by disconnect to know which skill vault to purge.
+pub fn service_to_skill_id(service_id: &str) -> String {
+    match service_id {
+        "slack" => "slack".into(),
+        "discord" => "discord".into(),
+        "github" | "github-app" => "github".into(),
+        "trello" => "trello".into(),
+        "telegram" => "telegram".into(),
+        // All these map to the shared rest_api skill
+        "notion" | "linear" | "stripe" | "todoist" | "clickup" | "airtable" | "sendgrid"
+        | "jira" | "zendesk" | "hubspot" | "shopify" | "pagerduty" | "twilio"
+        | "microsoft-teams" => "rest_api".into(),
+        // Fallback: skill_id == service_id
+        other => other.into(),
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

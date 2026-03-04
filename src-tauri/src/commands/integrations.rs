@@ -5,23 +5,34 @@
 // view to the channel config persistence layer.
 
 use crate::engine::channels;
+use crate::engine::state::EngineState;
+use log::warn;
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 // ── Types ──────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ConnectedService {
+    #[serde(alias = "service_id")]
     pub service_id: String,
+    #[serde(alias = "connected_at")]
     pub connected_at: String,
+    #[serde(alias = "last_used")]
     pub last_used: Option<String>,
+    #[serde(alias = "tool_count")]
     pub tool_count: u32,
     pub status: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IntegrationOverview {
     pub connected: Vec<ConnectedService>,
+    #[serde(alias = "total_actions_today")]
     pub total_actions_today: u32,
+    #[serde(alias = "services_needing_attention")]
     pub services_needing_attention: u32,
 }
 
@@ -123,6 +134,22 @@ pub fn engine_integrations_disconnect(
         d.status = "disconnected".into();
     }
     save_details(&app_handle, &details)?;
+
+    // Purge the skill vault for this service so stale/corrupted credentials
+    // don't persist and break future reconnections.
+    let skill_id = crate::commands::n8n::service_to_skill_id(&service_id);
+    if let Some(state) = app_handle.try_state::<EngineState>() {
+        if let Err(e) = state.store.delete_all_skill_credentials(&skill_id) {
+            warn!(
+                "[disconnect] Failed to purge vault for skill '{}': {}",
+                skill_id, e
+            );
+        }
+        // Also disable the skill so the agent doesn't try to use it
+        if let Err(e) = state.store.set_skill_enabled(&skill_id, false) {
+            warn!("[disconnect] Failed to disable skill '{}': {}", skill_id, e);
+        }
+    }
 
     // Update health monitor
     let _ = crate::commands::health_monitor::engine_health_update_service(
