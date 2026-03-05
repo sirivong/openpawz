@@ -5,14 +5,12 @@
 // Legacy XOR-encrypted values (no prefix) are auto-migrated on read.
 
 use crate::atoms::error::{EngineError, EngineResult};
+use crate::engine::key_vault;
 use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use log::{error, info, warn};
 use std::sync::RwLock;
 use zeroize::Zeroizing;
-
-const VAULT_KEYRING_SERVICE: &str = "paw-skill-vault";
-const VAULT_KEYRING_USER: &str = "encryption-key";
 
 /// Prefix for AES-256-GCM encrypted values (distinguishes from legacy XOR).
 const AES_PREFIX: &str = "aes:";
@@ -71,58 +69,27 @@ pub fn get_vault_key() -> EngineResult<Vec<u8>> {
     Ok(result)
 }
 
-/// Check whether the vault key has already been cached (avoids keychain access).
-pub fn vault_key_cached() -> bool {
-    VAULT_KEY_CACHE
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some()
-}
-
-/// Read (or create) the vault key directly from the OS keychain.
+/// Read (or create) the vault key from the unified key vault.
 /// Returns `Zeroizing<Vec<u8>>` so callers don't need to manually zero.
 fn load_vault_key_from_keychain() -> EngineResult<Zeroizing<Vec<u8>>> {
-    let entry = keyring::Entry::new(VAULT_KEYRING_SERVICE, VAULT_KEYRING_USER).map_err(|e| {
-        error!(
-            "[vault] Keyring init failed — OS keychain unavailable: {}",
-            e
-        );
-        format!("Keyring init failed: {}", e)
-    })?;
-
-    match entry.get_password() {
-        Ok(key_b64) => {
-            let decoded =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
-                    .map_err(|e| {
-                        error!("[vault] Failed to decode stored vault key: {}", e);
-                        EngineError::Other(format!("Failed to decode vault key: {}", e))
-                    })?;
-            Ok(Zeroizing::new(decoded))
-        }
-        Err(keyring::Error::NoEntry) => {
-            // Generate a new random key using OS CSPRNG (not thread_rng)
-            use rand::rngs::OsRng;
-            use rand::RngCore;
-            let mut key = Zeroizing::new(vec![0u8; 32]);
-            OsRng.fill_bytes(&mut key);
-            let key_b64 =
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key.as_slice());
-            entry.set_password(&key_b64).map_err(|e| {
-                error!("[vault] Failed to store vault key in keychain: {}", e);
-                format!("Failed to store vault key in keychain: {}", e)
+    if let Some(key_b64) = key_vault::get(key_vault::PURPOSE_SKILL_VAULT) {
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
+            .map_err(|e| {
+                error!("[vault] Failed to decode stored vault key: {}", e);
+                EngineError::Other(format!("Failed to decode vault key: {}", e))
             })?;
-            info!("[vault] Created new vault encryption key in OS keychain");
-            Ok(key)
-        }
-        Err(e) => {
-            error!(
-                "[vault] OS keychain error — credential storage blocked: {}",
-                e
-            );
-            Err(EngineError::Keyring(e.to_string()))
-        }
+        return Ok(Zeroizing::new(decoded));
     }
+    // No key exists — generate a new random key using OS CSPRNG
+    use rand::rngs::OsRng;
+    use rand::RngCore;
+    let mut key = Zeroizing::new(vec![0u8; 32]);
+    OsRng.fill_bytes(&mut key);
+    let key_b64 =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key.as_slice());
+    key_vault::set(key_vault::PURPOSE_SKILL_VAULT, &key_b64);
+    info!("[vault] Created new vault encryption key in unified vault");
+    Ok(key)
 }
 
 /// Encrypt a plaintext credential value using AES-256-GCM.

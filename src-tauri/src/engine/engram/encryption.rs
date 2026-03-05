@@ -27,6 +27,7 @@ use sha2::Sha256;
 use std::sync::LazyLock;
 
 use crate::atoms::error::{EngineError, EngineResult};
+use crate::engine::key_vault;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Security Tier Classification
@@ -292,9 +293,6 @@ pub fn detect_pii(content: &str) -> PiiDetection {
 // Key Management (separate from skill vault)
 // ═════════════════════════════════════════════════════════════════════════════
 
-const MEMORY_KEYRING_SERVICE: &str = "paw-memory-vault";
-const MEMORY_KEYRING_USER: &str = "field-encryption-key";
-
 /// Current key version. Bump when rotating keys.
 const CURRENT_KEY_VERSION: u8 = 1;
 
@@ -361,48 +359,28 @@ pub fn get_memory_encryption_key() -> EngineResult<Vec<u8>> {
     Ok(result)
 }
 
-/// Read (or create) the memory encryption key directly from the OS keychain.
+/// Read (or create) the memory encryption key from the unified key vault.
 /// Returns `Zeroizing<Vec<u8>>` so callers don't need to manually zero.
 fn load_memory_key_from_keychain() -> EngineResult<zeroize::Zeroizing<Vec<u8>>> {
-    let entry = keyring::Entry::new(MEMORY_KEYRING_SERVICE, MEMORY_KEYRING_USER).map_err(|e| {
-        error!("[engram-encryption] Keyring init failed: {}", e);
-        format!("Keyring init failed: {}", e)
-    })?;
-
-    match entry.get_password() {
-        Ok(key_b64) => {
-            let decoded =
-                base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
-                    .map_err(|e| {
-                        error!(
-                            "[engram-encryption] Failed to decode memory encryption key: {}",
-                            e
-                        );
-                        EngineError::Other(format!("Failed to decode memory encryption key: {}", e))
-                    })?;
-            Ok(zeroize::Zeroizing::new(decoded))
-        }
-        Err(keyring::Error::NoEntry) => {
-            // Generate a new random 256-bit key using OS CSPRNG
-            let mut key = zeroize::Zeroizing::new(vec![0u8; 32]);
-            OsRng.fill_bytes(&mut key);
-            let key_b64 =
-                base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key.as_slice());
-            entry.set_password(&key_b64).map_err(|e| {
+    if let Some(key_b64) = key_vault::get(key_vault::PURPOSE_MEMORY_VAULT) {
+        let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
+            .map_err(|e| {
                 error!(
-                    "[engram-encryption] Failed to store memory encryption key: {}",
+                    "[engram-encryption] Failed to decode memory encryption key: {}",
                     e
                 );
-                format!("Failed to store memory encryption key: {}", e)
+                EngineError::Other(format!("Failed to decode memory encryption key: {}", e))
             })?;
-            info!("[engram-encryption] Created new field encryption key in OS keychain");
-            Ok(key)
-        }
-        Err(e) => {
-            error!("[engram-encryption] OS keychain error: {}", e);
-            Err(EngineError::Keyring(e.to_string()))
-        }
+        return Ok(zeroize::Zeroizing::new(decoded));
     }
+    // No key exists — generate a new random 256-bit key using OS CSPRNG
+    let mut key = zeroize::Zeroizing::new(vec![0u8; 32]);
+    OsRng.fill_bytes(&mut key);
+    let key_b64 =
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key.as_slice());
+    key_vault::set(key_vault::PURPOSE_MEMORY_VAULT, &key_b64);
+    info!("[engram-encryption] Created new field encryption key in unified vault");
+    Ok(key)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

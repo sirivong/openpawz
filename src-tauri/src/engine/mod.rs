@@ -22,6 +22,7 @@ pub mod engram;
 pub mod events;
 pub mod injection;
 pub mod irc;
+pub mod key_vault;
 pub mod matrix;
 pub mod mattermost;
 pub mod mcp;

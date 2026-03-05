@@ -23,13 +23,14 @@
 
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use log::{error, info, warn};
+use log::{info, warn};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::sync::LazyLock;
 
 use crate::atoms::error::{EngineError, EngineResult};
+use crate::engine::key_vault;
 use crate::engine::sessions::SessionStore;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -151,39 +152,25 @@ pub const UNIFIED_AUDIT_SCHEMA: &str = "
 // HMAC Key Management
 // ═════════════════════════════════════════════════════════════════════════════
 
-const AUDIT_KEYRING_SERVICE: &str = "paw-audit-chain";
-const AUDIT_KEYRING_USER: &str = "hmac-signing-key";
-
 /// Genesis hash — the prev_hash of the very first entry.
 const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
-/// Get or create the HMAC signing key from the OS keychain.
+/// Get or create the HMAC signing key from the unified key vault.
 /// Separate from memory encryption key and skill vault key.
 fn get_audit_signing_key() -> EngineResult<Vec<u8>> {
-    let entry = keyring::Entry::new(AUDIT_KEYRING_SERVICE, AUDIT_KEYRING_USER).map_err(|e| {
-        error!("[audit] Keyring init failed: {}", e);
-        EngineError::Other(format!("Audit keyring init failed: {}", e))
-    })?;
-
-    match entry.get_password() {
-        Ok(key_b64) => base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
-            .map_err(|e| EngineError::Other(format!("Failed to decode audit signing key: {}", e))),
-        Err(keyring::Error::NoEntry) => {
-            // Generate a new random key using OS CSPRNG (not thread_rng)
-            use rand::rngs::OsRng;
-            use rand::RngCore;
-            let mut key = vec![0u8; 32];
-            OsRng.fill_bytes(&mut key);
-            let key_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &key);
-            entry.set_password(&key_b64).map_err(|e| {
-                error!("[audit] Failed to store audit signing key: {}", e);
-                EngineError::Other(format!("Failed to store audit signing key: {}", e))
-            })?;
-            info!("[audit] Created new HMAC signing key in OS keychain");
-            Ok(key)
-        }
-        Err(e) => Err(EngineError::Keyring(e.to_string())),
+    if let Some(key_b64) = key_vault::get(key_vault::PURPOSE_AUDIT_CHAIN) {
+        return base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &key_b64)
+            .map_err(|e| EngineError::Other(format!("Failed to decode audit signing key: {}", e)));
     }
+    // No key exists — generate a new random key using OS CSPRNG
+    use rand::rngs::OsRng;
+    use rand::RngCore;
+    let mut key = vec![0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    let key_b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &key);
+    key_vault::set(key_vault::PURPOSE_AUDIT_CHAIN, &key_b64);
+    info!("[audit] Created new HMAC signing key in unified vault");
+    Ok(key)
 }
 
 /// Cached signing key (loaded once per process lifetime).
