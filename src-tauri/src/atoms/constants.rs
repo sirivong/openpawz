@@ -3,18 +3,9 @@
 // Rationale: collecting constants in one place eliminates magic strings,
 // makes auditing easier, and keeps every layer's code self-documenting.
 
-// ── Database encryption key identifiers ───────────────────────────────────
-// Used by `get_db_encryption_key()` / `has_db_encryption_key()` in lib.rs.
-// The keychain entry is keyed on (service, user) — changing either value
-// would cause existing keys to become unreachable. Treat as stable identifiers.
-pub(crate) const DB_KEY_SERVICE: &str = "paw-db-encryption";
-pub(crate) const DB_KEY_USER: &str = "paw-db-key";
-
-// ── Lock screen passphrase identifiers ────────────────────────────────────
-// Used by `lock_screen_*` commands in commands/utility.rs.
-// Stores a SHA-256 hash of the user's passphrase in the OS keychain.
-pub(crate) const LOCK_SERVICE: &str = "paw-lock-screen";
-pub(crate) const LOCK_USER: &str = "paw-lock-passphrase";
+// NOTE: Legacy keychain identifiers (DB_KEY_SERVICE, DB_KEY_USER,
+// LOCK_SERVICE, LOCK_USER) have been removed.  All keychain keys are now
+// stored in the unified key vault — see engine::key_vault.
 
 // ── Cron task execution cost-control limits ────────────────────────────────
 // Used by `run_cron_heartbeat()` in engine/commands.rs.

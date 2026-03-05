@@ -85,6 +85,14 @@ pub fn run() {
     let engine_state =
         commands::state::EngineState::new().expect("Failed to initialize Paw Agent Engine");
 
+    // ── Unified Key Vault ─────────────────────────────────────────────────
+    // Pre-load all encryption keys from a single OS keychain entry.
+    // This triggers at most ONE keychain prompt instead of 5–6 individual
+    // prompts that would otherwise appear as each subsystem lazily accesses
+    // its own key.  On first run, migrates any existing per-entry keys
+    // into the unified vault.
+    engine::key_vault::prefetch();
+
     // Initialize the cognitive event bus (§47.6 observability infrastructure).
     // Must happen before any gated_search / working_memory calls.
     engine::engram::cognitive_event::init();

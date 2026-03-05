@@ -27,7 +27,7 @@
 mod crypto;
 mod relay;
 
-use crate::atoms::error::{EngineError, EngineResult};
+use crate::atoms::error::EngineResult;
 use crate::engine::channels::{self, ChannelStatus, PendingUser};
 use crypto::{derive_pubkey, hex_decode, hex_encode};
 use log::{debug, info, warn};
@@ -87,47 +87,31 @@ fn get_stop_signal() -> Arc<AtomicBool> {
 
 const CONFIG_KEY: &str = "nostr_config";
 
-// ── Keychain Helpers ───────────────────────────────────────────────────
+// ── Key Vault Helpers ─────────────────────────────────────────────────
 
-const KEYRING_SERVICE: &str = "paw-nostr";
-const KEYRING_USER: &str = "private-key";
+use crate::engine::key_vault;
 
-/// Store the Nostr private key in the OS keychain.
+/// Store the Nostr private key in the unified key vault.
 fn keychain_set_private_key(hex_key: &str) -> EngineResult<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .map_err(|e| EngineError::Keyring(e.to_string()))?;
-    entry
-        .set_password(hex_key)
-        .map_err(|e| EngineError::Keyring(e.to_string()))?;
-    info!("[nostr] Private key stored in OS keychain");
+    key_vault::set(key_vault::PURPOSE_NOSTR_KEY, hex_key);
+    info!("[nostr] Private key stored in unified key vault");
     Ok(())
 }
 
-/// Retrieve the Nostr private key from the OS keychain.
+/// Retrieve the Nostr private key from the unified key vault.
 fn keychain_get_private_key() -> EngineResult<Option<String>> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .map_err(|e| EngineError::Keyring(e.to_string()))?;
-    match entry.get_password() {
-        Ok(key) if !key.is_empty() => Ok(Some(key)),
-        Ok(_) => Ok(None),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(EngineError::Keyring(e.to_string())),
+    match key_vault::get(key_vault::PURPOSE_NOSTR_KEY) {
+        Some(key) if !key.is_empty() => Ok(Some(key)),
+        _ => Ok(None),
     }
 }
 
-/// Delete the Nostr private key from the OS keychain.
+/// Delete the Nostr private key from the unified key vault.
 #[allow(dead_code)]
 fn keychain_delete_private_key() -> EngineResult<()> {
-    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_USER)
-        .map_err(|e| EngineError::Keyring(e.to_string()))?;
-    match entry.delete_credential() {
-        Ok(()) => {
-            info!("[nostr] Private key removed from OS keychain");
-            Ok(())
-        }
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(EngineError::Keyring(e.to_string())),
-    }
+    key_vault::remove(key_vault::PURPOSE_NOSTR_KEY);
+    info!("[nostr] Private key removed from unified key vault");
+    Ok(())
 }
 
 // ── Bridge Core ────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@
 use super::health::poll_n8n_ready;
 use super::types::*;
 use crate::atoms::error::{EngineError, EngineResult};
+use crate::engine::key_vault;
 
 // ── Runtime check ──────────────────────────────────────────────────────
 
@@ -452,32 +453,23 @@ fn read_n8n_encryption_key(data_dir: &std::path::Path) -> Option<String> {
     Some(key)
 }
 
-// ── Keychain storage for n8n encryption key ────────────────────────────
+// ── Key vault storage for n8n encryption key ──────────────────────────
 
-const N8N_KEY_SERVICE: &str = "paw-n8n-encryption";
-const N8N_KEY_USER: &str = "openpawz-n8n";
-
-/// Retrieve the n8n encryption key from the OS keychain.
+/// Retrieve the n8n encryption key from the unified key vault.
 fn get_n8n_encryption_key_from_keychain() -> Option<String> {
-    let entry = keyring::Entry::new(N8N_KEY_SERVICE, N8N_KEY_USER).ok()?;
-    match entry.get_password() {
-        Ok(key) if !key.is_empty() => {
-            log::info!("[n8n] Retrieved encryption key from OS keychain");
+    match key_vault::get(key_vault::PURPOSE_N8N_ENCRYPTION) {
+        Some(key) if !key.is_empty() => {
+            log::info!("[n8n] Retrieved encryption key from unified vault");
             Some(key)
         }
         _ => None,
     }
 }
 
-/// Store the n8n encryption key in the OS keychain.
+/// Store the n8n encryption key in the unified key vault.
 fn store_n8n_encryption_key_in_keychain(key: &str) {
-    match keyring::Entry::new(N8N_KEY_SERVICE, N8N_KEY_USER) {
-        Ok(entry) => match entry.set_password(key) {
-            Ok(_) => log::info!("[n8n] Stored encryption key in OS keychain"),
-            Err(e) => log::warn!("[n8n] Failed to store encryption key in keychain: {}", e),
-        },
-        Err(e) => log::warn!("[n8n] Failed to init keyring entry: {}", e),
-    }
+    key_vault::set(key_vault::PURPOSE_N8N_ENCRYPTION, key);
+    log::info!("[n8n] Stored encryption key in unified vault");
 }
 
 /// Write the encryption key to n8n's config file so it matches the env var.

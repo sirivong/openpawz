@@ -10,6 +10,7 @@
 //   Tier 5 — Manual API keys (existing flow)
 
 use crate::commands::n8n::{get_n8n_endpoint, map_integration_to_skill};
+use crate::engine::key_vault;
 use crate::engine::oauth::{
     get_n8n_oauth_type, get_oauth_config, get_rfc7591_config, n8n_credential_url,
     n8n_oauth_service_ids, oauth_service_ids, refresh_access_token, resolve_tier,
@@ -298,22 +299,11 @@ pub async fn engine_oauth_status(service_id: String) -> Result<OAuthTokenStatus,
 pub async fn engine_oauth_revoke(service_id: String) -> Result<(), String> {
     info!("[oauth-cmd] Revoking OAuth tokens for '{}'", service_id);
 
-    // Delete from vault
-    let vault_key = format!("{}{}", OAUTH_VAULT_PREFIX, service_id);
-    let entry = keyring::Entry::new("paw-skill-vault", &vault_key)
-        .map_err(|e| format!("Keyring error: {}", e))?;
-
-    match entry.delete_credential() {
-        Ok(_) => {
-            info!("[oauth-cmd] Deleted OAuth tokens for '{}'", service_id);
-            Ok(())
-        }
-        Err(keyring::Error::NoEntry) => {
-            // Already deleted — not an error
-            Ok(())
-        }
-        Err(e) => Err(format!("Failed to delete OAuth tokens: {}", e)),
-    }
+    // Delete from unified vault
+    let vault_purpose = format!("oauth:{}", service_id);
+    key_vault::remove(&vault_purpose);
+    info!("[oauth-cmd] Deleted OAuth tokens for '{}'", service_id);
+    Ok(())
 }
 
 /// Resolve the OAuth tier for a service. The frontend uses this to
@@ -489,44 +479,61 @@ pub async fn get_oauth_access_token(service_id: &str) -> Result<String, String> 
 
 // ── Vault Storage ────────────────────────────────────────────────
 
-/// Store OAuth tokens encrypted in the skill vault keychain entry.
+/// Store OAuth tokens encrypted in the unified key vault.
 fn store_oauth_tokens(service_id: &str, tokens: &OAuthTokens) -> Result<(), String> {
     let vault_key = get_vault_key().map_err(|e| format!("Vault key error: {}", e))?;
     let json = serde_json::to_string(tokens).map_err(|e| format!("Serialize error: {}", e))?;
     let encrypted = encrypt_credential(&json, &vault_key);
 
-    let entry_key = format!("{}{}", OAUTH_VAULT_PREFIX, service_id);
-    let entry = keyring::Entry::new("paw-skill-vault", &entry_key)
-        .map_err(|e| format!("Keyring error: {}", e))?;
-    entry
-        .set_password(&encrypted)
-        .map_err(|e| format!("Failed to store OAuth tokens in keychain: {}", e))?;
+    let vault_purpose = format!("oauth:{}", service_id);
+    key_vault::set(&vault_purpose, &encrypted);
 
     info!(
-        "[oauth] Stored encrypted OAuth tokens for '{}' in OS keychain",
+        "[oauth] Stored encrypted OAuth tokens for '{}' in unified vault",
         service_id
     );
     Ok(())
 }
 
-/// Load OAuth tokens from the skill vault keychain entry.
+/// Load OAuth tokens from the unified key vault.
+/// Falls back to the legacy per-entry keychain for migration.
 fn load_oauth_tokens(service_id: &str) -> Result<Option<OAuthTokens>, String> {
     let vault_key = get_vault_key().map_err(|e| format!("Vault key error: {}", e))?;
 
-    let entry_key = format!("{}{}", OAUTH_VAULT_PREFIX, service_id);
-    let entry = keyring::Entry::new("paw-skill-vault", &entry_key)
-        .map_err(|e| format!("Keyring error: {}", e))?;
+    let vault_purpose = format!("oauth:{}", service_id);
 
-    match entry.get_password() {
-        Ok(encrypted) => {
-            let json = decrypt_credential(&encrypted, &vault_key)
-                .map_err(|e| format!("Decrypt error: {}", e))?;
-            let tokens: OAuthTokens =
-                serde_json::from_str(&json).map_err(|e| format!("Deserialize error: {}", e))?;
-            Ok(Some(tokens))
-        }
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(format!("Failed to load OAuth tokens: {}", e)),
+    // Try unified vault first
+    if let Some(encrypted) = key_vault::get(&vault_purpose) {
+        let json = decrypt_credential(&encrypted, &vault_key)
+            .map_err(|e| format!("Decrypt error: {}", e))?;
+        let tokens: OAuthTokens =
+            serde_json::from_str(&json).map_err(|e| format!("Deserialize error: {}", e))?;
+        return Ok(Some(tokens));
+    }
+
+    // Fall back to legacy per-entry keychain and migrate if found
+    let legacy_key = format!("{}{}", OAUTH_VAULT_PREFIX, service_id);
+    match keyring::Entry::new("paw-skill-vault", &legacy_key) {
+        Ok(entry) => match entry.get_password() {
+            Ok(encrypted) => {
+                // Migrate to unified vault
+                key_vault::set(&vault_purpose, &encrypted);
+                // Delete legacy entry (best-effort)
+                let _ = entry.delete_credential();
+                info!(
+                    "[oauth] Migrated tokens for '{}' from legacy keychain to unified vault",
+                    service_id
+                );
+                let json = decrypt_credential(&encrypted, &vault_key)
+                    .map_err(|e| format!("Decrypt error: {}", e))?;
+                let tokens: OAuthTokens =
+                    serde_json::from_str(&json).map_err(|e| format!("Deserialize error: {}", e))?;
+                Ok(Some(tokens))
+            }
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("Failed to load OAuth tokens: {}", e)),
+        },
+        Err(_) => Ok(None),
     }
 }
 

@@ -15,7 +15,7 @@
 //   - Passphrase hash comparison uses `subtle::ConstantTimeEq` to resist
 //     timing side-channel attacks.
 
-use crate::atoms::constants::{DB_KEY_SERVICE, DB_KEY_USER, LOCK_SERVICE, LOCK_USER};
+use crate::engine::key_vault;
 use log::{error, info};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -93,44 +93,29 @@ pub fn get_db_encryption_key() -> Result<String, String> {
     Ok(result)
 }
 
-/// Read (or create) the DB encryption key directly from the OS keychain.
+/// Read (or create) the DB encryption key from the unified key vault.
 /// Returns `Zeroizing<String>` so the key is securely zeroed when dropped.
 fn load_db_key_from_keychain() -> Result<Zeroizing<String>, String> {
-    let entry = keyring::Entry::new(DB_KEY_SERVICE, DB_KEY_USER).map_err(|e| {
-        error!("[keychain] Failed to initialise keyring entry: {}", e);
-        format!("Keyring init failed: {}", e)
-    })?;
-    match entry.get_password() {
-        Ok(key) => {
-            info!("Retrieved DB encryption key from OS keychain");
-            Ok(Zeroizing::new(key))
-        }
-        Err(keyring::Error::NoEntry) => {
-            // Generate a new random key using OS CSPRNG (not thread_rng)
-            use rand::rngs::OsRng;
-            use rand::RngCore;
-            let mut bytes = [0u8; 32];
-            OsRng.fill_bytes(&mut bytes);
-            let key = Zeroizing::new(
-                bytes
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>(),
-            );
-            // Zero the raw bytes immediately
-            zeroize::Zeroize::zeroize(&mut bytes);
-            entry.set_password(&key).map_err(|e| {
-                error!("[keychain] Failed to store DB encryption key: {}", e);
-                format!("Failed to store DB key: {}", e)
-            })?;
-            info!("Generated and stored new DB encryption key in OS keychain");
-            Ok(key)
-        }
-        Err(e) => {
-            error!("[keychain] Failed to retrieve DB encryption key: {}", e);
-            Err(format!("Keyring error: {}", e))
-        }
+    if let Some(key) = key_vault::get(key_vault::PURPOSE_DB_ENCRYPTION) {
+        info!("Retrieved DB encryption key from unified vault");
+        return Ok(Zeroizing::new(key));
     }
+    // No key exists — generate a new random key using OS CSPRNG
+    use rand::rngs::OsRng;
+    use rand::RngCore;
+    let mut bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut bytes);
+    let key = Zeroizing::new(
+        bytes
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>(),
+    );
+    // Zero the raw bytes immediately
+    zeroize::Zeroize::zeroize(&mut bytes);
+    key_vault::set(key_vault::PURPOSE_DB_ENCRYPTION, &key);
+    info!("Generated and stored new DB encryption key in unified vault");
+    Ok(key)
 }
 
 /// Check if a DB encryption key exists (for UI indicators).
@@ -145,10 +130,7 @@ pub fn has_db_encryption_key() -> bool {
     {
         return true;
     }
-    keyring::Entry::new(DB_KEY_SERVICE, DB_KEY_USER)
-        .ok()
-        .and_then(|e| e.get_password().ok())
-        .is_some()
+    key_vault::get(key_vault::PURPOSE_DB_ENCRYPTION).is_some()
 }
 
 // ── Lock Screen Passphrase ─────────────────────────────────────────────────
@@ -174,10 +156,8 @@ pub fn lock_screen_has_passphrase() -> bool {
     {
         return true;
     }
-    // Fall through to keychain (populates the cache on success)
-    let result = keyring::Entry::new(LOCK_SERVICE, LOCK_USER)
-        .ok()
-        .and_then(|e| e.get_password().ok());
+    // Fall through to unified vault (populates the cache on success)
+    let result = key_vault::get(key_vault::PURPOSE_LOCK_SCREEN);
     if let Some(ref hash) = result {
         let mut guard = LOCK_HASH_CACHE.write().unwrap_or_else(|e| e.into_inner());
         *guard = Some(Zeroizing::new(hash.clone()));
@@ -193,11 +173,7 @@ pub fn lock_screen_set_passphrase(passphrase: String) -> Result<(), String> {
         return Err("Passphrase must be at least 4 characters".into());
     }
     let hash = hash_passphrase(&passphrase);
-    let entry = keyring::Entry::new(LOCK_SERVICE, LOCK_USER)
-        .map_err(|e| format!("Keyring init failed: {}", e))?;
-    entry
-        .set_password(&hash)
-        .map_err(|e| format!("Failed to store passphrase: {}", e))?;
+    key_vault::set(key_vault::PURPOSE_LOCK_SCREEN, &hash);
     // Update cache (write lock, poison-safe, zeroized)
     *LOCK_HASH_CACHE.write().unwrap_or_else(|e| e.into_inner()) = Some(Zeroizing::new(hash));
     info!("[lock] Passphrase set in OS keychain");
@@ -220,11 +196,9 @@ pub fn lock_screen_verify_passphrase(passphrase: String) -> Result<bool, String>
         }
     }
 
-    // Fall through to keychain
-    let entry = keyring::Entry::new(LOCK_SERVICE, LOCK_USER)
-        .map_err(|e| format!("Keyring init failed: {}", e))?;
-    match entry.get_password() {
-        Ok(stored_hash) => {
+    // Fall through to unified vault
+    match key_vault::get(key_vault::PURPOSE_LOCK_SCREEN) {
+        Some(stored_hash) => {
             // Constant-time comparison
             let matches: bool = stored_hash.as_bytes().ct_eq(input_hash.as_bytes()).into();
             // Populate cache (write lock, poison-safe, zeroized)
@@ -232,8 +206,7 @@ pub fn lock_screen_verify_passphrase(passphrase: String) -> Result<bool, String>
                 Some(Zeroizing::new(stored_hash));
             Ok(matches)
         }
-        Err(keyring::Error::NoEntry) => Err("No passphrase configured".into()),
-        Err(e) => Err(format!("Keyring error: {}", e)),
+        None => Err("No passphrase configured".into()),
     }
 }
 
@@ -241,20 +214,12 @@ pub fn lock_screen_verify_passphrase(passphrase: String) -> Result<bool, String>
 /// Also clears the in-memory cache.
 #[tauri::command]
 pub fn lock_screen_remove_passphrase() -> Result<(), String> {
-    let entry = keyring::Entry::new(LOCK_SERVICE, LOCK_USER)
-        .map_err(|e| format!("Keyring init failed: {}", e))?;
-    let result = match entry.delete_credential() {
-        Ok(()) => {
-            info!("[lock] Passphrase removed from OS keychain");
-            Ok(())
-        }
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(e) => Err(format!("Failed to remove passphrase: {}", e)),
-    };
-    // Clear cache regardless of outcome (write lock, poison-safe)
+    key_vault::remove(key_vault::PURPOSE_LOCK_SCREEN);
+    info!("[lock] Passphrase removed from unified vault");
+    // Clear cache (write lock, poison-safe)
     // The old Zeroizing<String> is dropped here, securely zeroing the hash.
     *LOCK_HASH_CACHE.write().unwrap_or_else(|e| e.into_inner()) = None;
-    result
+    Ok(())
 }
 
 // ── System Authentication (macOS Touch ID / device password) ───────────────
@@ -360,79 +325,29 @@ pub struct KeychainHealth {
     pub error: Option<String>,
 }
 
-/// Check health of all keychain entries used by Paw.
-/// Tests both the DB encryption key and the skill vault key.
-/// Uses in-memory caches when available to avoid extra keychain prompts.
+/// Check health of the unified key vault.
+/// All encryption keys now live in a single OS keychain entry.
 #[tauri::command]
 pub fn check_keychain_health() -> KeychainHealth {
-    // Test DB encryption key access — use cache when available (read lock, poison-safe)
-    let db_key_ok = if DB_KEY_CACHE
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .is_some()
-    {
-        true
+    let keychain_ok = key_vault::is_loaded();
+
+    if keychain_ok {
+        KeychainHealth {
+            status: "healthy".to_string(),
+            db_key_ok: true,
+            vault_key_ok: true,
+            message: "OS keychain is accessible — all encryption keys protected".to_string(),
+            error: None,
+        }
     } else {
-        match keyring::Entry::new(DB_KEY_SERVICE, DB_KEY_USER)
-            .and_then(|e| e.get_password().map(|_| ()))
-        {
-            Ok(()) => true,
-            Err(keyring::Error::NoEntry) => true, // No entry yet is fine
-            Err(_) => false,
+        error!("[keychain] OS keychain completely unavailable");
+        KeychainHealth {
+            status: "unavailable".to_string(),
+            db_key_ok: false,
+            vault_key_ok: false,
+            message: "OS keychain is completely unavailable — no encryption possible. Install and unlock a keychain provider (GNOME Keyring, KWallet, or macOS Keychain).".to_string(),
+            error: Some("Unified key vault inaccessible".to_string()),
         }
-    };
-
-    // Test skill vault key access — check if get_vault_key() has been cached
-    let vault_key_ok = if crate::engine::skills::crypto::vault_key_cached() {
-        true
-    } else {
-        match keyring::Entry::new("paw-skill-vault", "encryption-key")
-            .and_then(|e| e.get_password().map(|_| ()))
-        {
-            Ok(()) => true,
-            Err(keyring::Error::NoEntry) => true,
-            Err(_) => false,
-        }
-    };
-
-    let (status, message, error) = match (db_key_ok, vault_key_ok) {
-        (true, true) => (
-            "healthy".to_string(),
-            "OS keychain is accessible — all encryption keys protected".to_string(),
-            None,
-        ),
-        (true, false) => {
-            error!("[keychain] Skill vault keychain not accessible");
-            (
-                "degraded".to_string(),
-                "DB encryption works but skill vault keychain is inaccessible — credential storage blocked".to_string(),
-                Some("Skill vault keychain error".to_string()),
-            )
-        }
-        (false, true) => {
-            error!("[keychain] DB key keychain not accessible");
-            (
-                "degraded".to_string(),
-                "Skill vault works but DB encryption keychain is inaccessible — field encryption disabled".to_string(),
-                Some("DB key keychain error".to_string()),
-            )
-        }
-        (false, false) => {
-            error!("[keychain] OS keychain completely unavailable");
-            (
-                "unavailable".to_string(),
-                "OS keychain is completely unavailable — no encryption possible. Install and unlock a keychain provider (GNOME Keyring, KWallet, or macOS Keychain).".to_string(),
-                Some("Both DB key and vault keychain inaccessible".to_string()),
-            )
-        }
-    };
-
-    KeychainHealth {
-        status,
-        db_key_ok,
-        vault_key_ok,
-        message,
-        error,
     }
 }
 
