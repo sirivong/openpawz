@@ -863,27 +863,63 @@ function showNameEditor(anchor: HTMLElement) {
 
 // ── Events ────────────────────────────────────────────────────────────
 
+/** Resize an image file to a small avatar data URL (max 128×128, JPEG 85%). */
+function resizeAvatarImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 128;
+      let w = img.width;
+      let h = img.height;
+      if (w > h) {
+        if (w > MAX) {
+          h = Math.round(h * (MAX / w));
+          w = MAX;
+        }
+      } else {
+        if (h > MAX) {
+          w = Math.round(w * (MAX / h));
+          h = MAX;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        reject(new Error('Canvas not supported'));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => reject(new Error('Failed to load image'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function bindEvents() {
   // ── Profile avatar upload ───────────────────────────────────────────
   $('today-avatar')?.addEventListener('click', () => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = 'image/png,image/jpeg,image/gif,image/webp';
-    input.addEventListener('change', () => {
+    input.addEventListener('change', async () => {
       const file = input.files?.[0];
       if (!file) return;
-      if (file.size > 2 * 1024 * 1024) {
-        showToast('Image must be under 2 MB', 'error');
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('Image must be under 5 MB', 'error');
         return;
       }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
+      try {
+        const dataUrl = await resizeAvatarImage(file);
         localStorage.setItem('paw-user-avatar', dataUrl);
         showToast('Profile picture updated', 'success');
         _state.getRenderToday()();
-      };
-      reader.readAsDataURL(file);
+      } catch (e) {
+        console.error('[today] Avatar upload failed:', e);
+        showToast('Failed to save profile picture', 'error');
+      }
     });
     input.click();
   });
