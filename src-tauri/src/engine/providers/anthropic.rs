@@ -31,8 +31,11 @@ pub struct AnthropicProvider {
     base_url: String,
     /// API key wrapped in Zeroizing<> — automatically zeroed from RAM on drop.
     api_key: Zeroizing<String>,
-    /// Azure OpenAI (*.openai.azure.com / *.cognitiveservices.azure.com) —
-    /// uses `api-key` header and `?api-version=` query param.
+    /// Any Azure-hosted endpoint — uses `api-key` header instead of
+    /// `x-api-key`, and all Azure endpoints need `?api-version=`.
+    is_azure: bool,
+    /// Classic Azure OpenAI (*.openai.azure.com / *.cognitiveservices.azure.com)
+    /// uses a different api-version than Azure AI Foundry.
     is_azure_openai: bool,
 }
 
@@ -42,15 +45,16 @@ impl AnthropicProvider {
             .base_url
             .clone()
             .unwrap_or_else(|| config.kind.default_base_url().to_string());
-        // Azure OpenAI endpoints use a different auth header (api-key) and
-        // require ?api-version=. Azure AI Foundry (*.services.ai.azure.com)
-        // proxies the native Anthropic API and uses standard x-api-key auth.
+        // All Azure endpoints use `api-key` header.
+        let is_azure = base_url.contains(".azure.com");
+        // Classic Azure OpenAI additionally requires ?api-version= on the URL.
         let is_azure_openai = base_url.contains(".openai.azure.com")
             || base_url.contains(".cognitiveservices.azure.com");
         AnthropicProvider {
             client: pinned_client(),
             base_url,
             api_key: Zeroizing::new(config.api_key.clone()),
+            is_azure,
             is_azure_openai,
         }
     }
@@ -411,23 +415,40 @@ impl AnthropicProvider {
         temperature: Option<f64>,
         thinking_level: Option<&str>,
     ) -> Result<Vec<StreamChunk>, ProviderError> {
-        let url = if self.is_azure_openai {
-            let base = self.base_url.trim_end_matches('/');
+        let base = self.base_url.trim_end_matches('/');
+        let mut url = if base.contains("/v1/messages") {
+            // Full endpoint URL (e.g. Azure AI Foundry Target URI) — use as-is.
+            base.to_string()
+        } else if self.is_azure_openai {
+            // Classic Azure OpenAI — append path + api-version.
             if base.contains('?') {
                 format!("{}/v1/messages", base)
             } else {
                 format!("{}/v1/messages?api-version=2024-08-01", base)
             }
         } else {
-            format!("{}/v1/messages", self.base_url.trim_end_matches('/'))
+            format!("{}/v1/messages", base)
         };
+
+        // Classic Azure OpenAI endpoints require ?api-version=.
+        // Azure AI Foundry /anthropic endpoints do NOT — they use the
+        // native Anthropic Messages API and reject unknown query params.
+        if self.is_azure_openai && !url.contains("api-version") {
+            let sep = if url.contains('?') { '&' } else { '?' };
+            url = format!("{}{}api-version=2024-08-01", url, sep);
+        }
 
         let (system, mut formatted_messages) = Self::format_messages(messages);
 
         // ── Multi-turn conversation caching: mark a breakpoint in the
         // conversation history so Anthropic caches the prefix. This
         // gives ~90% discount on input tokens for the cached portion.
-        Self::add_turn_cache_breakpoints(&mut formatted_messages);
+        // (Skip on classic Azure OpenAI — prompt caching not supported.
+        //  Azure AI Foundry's /anthropic proxy IS native Anthropic and
+        //  accepts all caching features.)
+        if !self.is_azure_openai {
+            Self::add_turn_cache_breakpoints(&mut formatted_messages);
+        }
 
         // Model-aware max_tokens via the Engram model capability registry.
         // Replaces the hardcoded 4096/8192 split with accurate per-model values.
@@ -445,22 +466,33 @@ impl AnthropicProvider {
         // cache_control on the last block.  Anthropic caches the entire
         // prefix up to and including the marked block, giving a 90%
         // discount on input tokens for subsequent requests within 5 min.
+        // Classic Azure OpenAI doesn't support prompt caching, so send
+        // plain system text there.  Azure AI Foundry's /anthropic proxy
+        // IS native Anthropic and accepts cache_control.
         if let Some(sys) = system {
-            body["system"] = json!([
-                {
-                    "type": "text",
-                    "text": sys,
-                    "cache_control": { "type": "ephemeral" }
-                }
-            ]);
+            if self.is_azure_openai {
+                body["system"] = json!(sys);
+            } else {
+                body["system"] = json!([
+                    {
+                        "type": "text",
+                        "text": sys,
+                        "cache_control": { "type": "ephemeral" }
+                    }
+                ]);
+            }
         }
         if !tools.is_empty() {
             let mut tool_list = Self::format_tools(tools);
             // Mark the last tool for caching so the entire tools prefix is
             // included in the cached segment along with the system prompt.
-            if let Some(last) = tool_list.last_mut() {
-                if let Some(obj) = last.as_object_mut() {
-                    obj.insert("cache_control".into(), json!({ "type": "ephemeral" }));
+            // (Skip on classic Azure OpenAI — prompt caching not supported.
+            //  Azure AI Foundry's /anthropic proxy accepts cache_control.)
+            if !self.is_azure_openai {
+                if let Some(last) = tool_list.last_mut() {
+                    if let Some(obj) = last.as_object_mut() {
+                        obj.insert("cache_control".into(), json!({ "type": "ephemeral" }));
+                    }
                 }
             }
             body["tools"] = json!(tool_list);
@@ -495,7 +527,10 @@ impl AnthropicProvider {
             }
         }
 
-        info!("[engine] Anthropic request to {} model={}", url, model);
+        info!(
+            "[engine] Anthropic request to {} model={} azure={}",
+            url, model, self.is_azure
+        );
 
         // Circuit breaker: reject immediately if too many recent failures
         if let Err(msg) = ANTHROPIC_CIRCUIT.check() {
@@ -520,11 +555,18 @@ impl AnthropicProvider {
                 .client
                 .post(&url)
                 .header("anthropic-version", "2023-06-01")
-                .header("Content-Type", "application/json")
-                .header(
+                .header("Content-Type", "application/json");
+            // Classic Azure OpenAI doesn't support Anthropic beta features.
+            // Azure AI Foundry's /anthropic proxy IS native Anthropic and
+            // accepts the beta header — only skip for classic Azure OpenAI.
+            if !self.is_azure_openai {
+                req = req.header(
                     "anthropic-beta",
                     "prompt-caching-2024-07-31,interleaved-thinking-2025-05-14",
                 );
+            }
+            // Azure AI Foundry /anthropic proxy uses native Anthropic auth
+            // (x-api-key). Only classic Azure OpenAI uses the api-key header.
             if self.is_azure_openai {
                 req = req.header("api-key", self.api_key.as_str());
             } else {
