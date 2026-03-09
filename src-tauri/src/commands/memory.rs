@@ -175,17 +175,56 @@ pub fn engine_memory_list(
     };
     let lim = limit.unwrap_or(100);
 
+    // Collect from both episodic (new) and legacy memories tables
+    let mut results: Vec<Memory> = Vec::new();
+    let mut seen_ids = std::collections::HashSet::new();
+
+    // New engram episodic memories
     match state.store.engram_list_episodic(&scope, None, lim) {
-        Ok(memories) => Ok(memories.into_iter().map(episodic_to_memory).collect()),
+        Ok(memories) => {
+            for mem in memories {
+                seen_ids.insert(mem.id.clone());
+                results.push(episodic_to_memory(mem));
+            }
+        }
         Err(e) => {
-            // Fallback to old memory table
-            info!(
-                "[memory] Engram list failed ({}), falling back to old store",
-                e
-            );
-            state.store.list_memories(lim).map_err(|e| e.to_string())
+            info!("[memory] Engram list failed ({}), skipping episodic", e);
         }
     }
+
+    // Old legacy memories (fill remaining slots, skip duplicates)
+    let remaining = lim.saturating_sub(results.len());
+    if remaining > 0 {
+        match state.store.list_memories(remaining) {
+            Ok(old_memories) => {
+                for mem in old_memories {
+                    if !seen_ids.contains(&mem.id) {
+                        seen_ids.insert(mem.id.clone());
+                        results.push(mem);
+                    }
+                }
+            }
+            Err(e) => {
+                info!("[memory] Legacy list failed ({})", e);
+            }
+        }
+    }
+
+    // Sort combined results by created_at descending
+    results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(results)
+}
+
+#[tauri::command]
+pub fn engine_memory_delete_by_session(
+    state: State<'_, EngineState>,
+    session_id: String,
+) -> Result<usize, String> {
+    state
+        .store
+        .engram_delete_episodic_by_session(&session_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]

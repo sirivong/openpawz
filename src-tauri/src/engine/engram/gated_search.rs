@@ -64,6 +64,53 @@ pub const CRAG_THRESHOLD_AMBIGUOUS: f32 = 0.3;
 /// Maximum sub-queries in a CRAG decompose-and-retry pass.
 const MAX_DECOMPOSE_SUB_QUERIES: usize = 6;
 
+/// Words indicating the query is about the agent itself (identity/capability).
+/// Used structurally: must co-occur with a 2nd-person pronoun ("you"/"your")
+/// to trigger Skip. "what is your name" matches; "what is the name" does not.
+static META_NOUNS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "name",
+        "role",
+        "model",
+        "purpose",
+        "identity",
+        "version",
+        "capabilities",
+        "tools",
+        "skills",
+        "provider",
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Explicit topic-switch signals. When the user says one of these, they're
+/// explicitly resetting context — memory recall from the old topic would be
+/// counterproductive.
+static TOPIC_SWITCH_SIGNALS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    [
+        "new topic",
+        "change topic",
+        "moving on",
+        "lets move on",
+        "let's move on",
+        "start over",
+        "never mind",
+        "nevermind",
+        "forget it",
+        "forget that",
+        "something else",
+        "anyway",
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Minimum relevance score for recalled memories to be injected.
+/// If the best recalled memory scores below this, the user likely switched
+/// topics and injection would contaminate the response.
+pub const TOPIC_SHIFT_RELEVANCE_FLOOR: f32 = 0.25;
+
 /// Skip-gate: social/ACK tokens.
 /// O(1) lookup via HashSet. Includes multi-language greetings (es/fr/de/pt/ja).
 static SKIP_TOKENS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
@@ -288,6 +335,31 @@ pub fn gate_decision(query: &str) -> GateDecision {
             .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()))
             .unwrap_or("");
         if !ACTION_VERBS.contains(first_word) {
+            return GateDecision::Skip;
+        }
+    }
+
+    // Self-referential queries: 2nd-person pronoun + meta-noun.
+    // "what is your name" → Skip; "what is the project name" → Retrieve.
+    // Structural: detects any phrasing with "you"/"your" + identity/capability noun.
+    if words
+        .iter()
+        .any(|w| *w == "you" || *w == "your" || *w == "yourself" || *w == "ya" || *w == "ur")
+    {
+        let has_meta_noun = words
+            .iter()
+            .any(|w| META_NOUNS.contains(w.trim_matches(|c: char| !c.is_alphanumeric())));
+        // Also catch "who are you", "what are you"
+        let is_identity_question =
+            q.starts_with("who ") || (q.starts_with("what ") && q.contains(" you"));
+        if has_meta_noun || is_identity_question {
+            return GateDecision::Skip;
+        }
+    }
+
+    // Explicit topic-switch signals — user is deliberately changing context.
+    for signal in TOPIC_SWITCH_SIGNALS.iter() {
+        if q.contains(signal) {
             return GateDecision::Skip;
         }
     }

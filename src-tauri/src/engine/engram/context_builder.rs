@@ -382,36 +382,55 @@ impl<'a> ContextBuilder<'a> {
                         }
                         _ => {
                             // Retrieve / DeepRetrieve — use the memories
-                            let resistance = resolve_injection_resistance(&self.model);
-                            recalled_memories = result
+                            // §55.4 Topic-shift relevance floor: if the best
+                            // recalled memory has very low relevance, the user
+                            // likely switched topics. Injecting stale memories
+                            // causes the model to loop on the old topic.
+                            let top_relevance = result
                                 .memories
-                                .into_iter()
-                                .map(|mut m| {
-                                    // Decrypt with per-agent derived key (HKDF isolation)
-                                    if let Ok(key) =
-                                        encryption::get_agent_encryption_key(&m.agent_id)
-                                    {
-                                        m.content =
-                                            encryption::decrypt_memory_content(&m.content, &key)
-                                                .unwrap_or(m.content);
-                                    }
-                                    // Level-aware sanitization (Standard/Strict/Paranoid per model tier)
-                                    m.content = encryption::sanitize_recalled_memory_at_level(
-                                        &m.content,
-                                        resistance.sanitization_level,
-                                    );
-                                    // Per-model content length cap (§58.5)
-                                    if m.content.len() > resistance.max_memory_content_chars {
-                                        let mut end = resistance.max_memory_content_chars;
-                                        while end > 0 && !m.content.is_char_boundary(end) {
-                                            end -= 1;
+                                .first()
+                                .map(|m| m.trust_score.relevance)
+                                .unwrap_or(0.0);
+                            if top_relevance < super::gated_search::TOPIC_SHIFT_RELEVANCE_FLOOR {
+                                info!(
+                                    "[engram:context] Topic-shift detected: top relevance={:.3} < floor={:.3} — suppressing recall",
+                                    top_relevance,
+                                    super::gated_search::TOPIC_SHIFT_RELEVANCE_FLOOR,
+                                );
+                            } else {
+                                let resistance = resolve_injection_resistance(&self.model);
+                                recalled_memories = result
+                                    .memories
+                                    .into_iter()
+                                    .map(|mut m| {
+                                        // Decrypt with per-agent derived key (HKDF isolation)
+                                        if let Ok(key) =
+                                            encryption::get_agent_encryption_key(&m.agent_id)
+                                        {
+                                            m.content = encryption::decrypt_memory_content(
+                                                &m.content, &key,
+                                            )
+                                            .unwrap_or(m.content);
                                         }
-                                        m.content = format!("{}…[truncated]", &m.content[..end]);
-                                    }
-                                    m
-                                })
-                                .collect();
-                            recalled_memories.truncate(resistance.max_recalled_memories);
+                                        // Level-aware sanitization (Standard/Strict/Paranoid per model tier)
+                                        m.content = encryption::sanitize_recalled_memory_at_level(
+                                            &m.content,
+                                            resistance.sanitization_level,
+                                        );
+                                        // Per-model content length cap (§58.5)
+                                        if m.content.len() > resistance.max_memory_content_chars {
+                                            let mut end = resistance.max_memory_content_chars;
+                                            while end > 0 && !m.content.is_char_boundary(end) {
+                                                end -= 1;
+                                            }
+                                            m.content =
+                                                format!("{}…[truncated]", &m.content[..end]);
+                                        }
+                                        m
+                                    })
+                                    .collect();
+                                recalled_memories.truncate(resistance.max_recalled_memories);
+                            }
                         }
                     }
                 }

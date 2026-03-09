@@ -157,6 +157,31 @@ impl SessionStore {
         Ok(())
     }
 
+    /// Delete all episodic memories associated with a session.
+    pub fn engram_delete_episodic_by_session(&self, session_id: &str) -> EngineResult<usize> {
+        let conn = self.conn.lock();
+        // Collect IDs first so we can clean up edges
+        let mut stmt = conn.prepare("SELECT id FROM episodic_memories WHERE session_id = ?1")?;
+        let ids: Vec<String> = stmt
+            .query_map(params![session_id], |row| row.get(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+        if ids.is_empty() {
+            return Ok(0);
+        }
+        for id in &ids {
+            conn.execute(
+                "DELETE FROM memory_edges WHERE source_id = ?1 OR target_id = ?1",
+                params![id],
+            )?;
+        }
+        let deleted = conn.execute(
+            "DELETE FROM episodic_memories WHERE session_id = ?1",
+            params![session_id],
+        )?;
+        Ok(deleted)
+    }
+
     /// Update trust scores for an episodic memory.
     pub fn engram_update_trust(&self, id: &str, trust: &TrustScore) -> EngineResult<()> {
         let conn = self.conn.lock();

@@ -306,6 +306,7 @@ pub fn run() {
             commands::memory::engine_memory_get,
             commands::memory::engine_memory_update,
             commands::memory::engine_memory_delete,
+            commands::memory::engine_memory_delete_by_session,
             commands::memory::engine_memory_list,
             commands::memory::engine_memory_edges,
             commands::memory::engine_get_memory_config,
