@@ -258,7 +258,7 @@ fn build_all_tools_for_index(
     state: &EngineState,
     mcp_tools: &[ToolDefinition],
 ) -> Vec<ToolDefinition> {
-    let mut tools = ToolDefinition::builtins();
+    let mut tools = crate::engine::tools::builtin_tools();
 
     // Include ALL skill tools for indexing (even disabled ones)
     // so the agent can discover them and we can tell it "enable the X skill first"
@@ -278,7 +278,7 @@ fn build_all_tools_for_index(
         "discourse".to_string(),
         "trello".to_string(),
     ];
-    tools.extend(ToolDefinition::skill_tools(&all_skill_ids));
+    tools.extend(crate::engine::tools::skill_tools(&all_skill_ids));
 
     // Include MCP tools (n8n integrations, custom MCP servers, etc.)
     // so the Librarian can discover mcp_n8n_* workflow tools via semantic search.

@@ -435,7 +435,7 @@ async fn run_swarm_turn(
     let loaded_tools = {
         let mut all_names = std::collections::HashSet::new();
         // Pre-load ALL tool names so swarm agents skip the librarian step
-        for t in crate::atoms::types::ToolDefinition::builtins() {
+        for t in crate::engine::tools::builtin_tools() {
             all_names.insert(t.function.name);
         }
         let enabled_ids: Vec<String> = crate::engine::skills::builtin_skills()
@@ -449,7 +449,7 @@ async fn run_swarm_turn(
             })
             .map(|s| s.id.clone())
             .collect();
-        for t in crate::atoms::types::ToolDefinition::skill_tools(&enabled_ids) {
+        for t in crate::engine::tools::skill_tools(&enabled_ids) {
             all_names.insert(t.function.name);
         }
         all_names

@@ -109,26 +109,26 @@ pub async fn execute_task(
     let skill_instructions =
         skills::get_enabled_skill_instructions(&state.store, first_agent_id).unwrap_or_default();
 
-    let mut all_tools = ToolDefinition::builtins();
+    let mut all_tools = crate::engine::tools::builtin_tools();
     let enabled_ids: Vec<String> = skills::builtin_skills()
         .iter()
         .filter(|s| state.store.is_skill_enabled(&s.id).unwrap_or(false))
         .map(|s| s.id.clone())
         .collect();
     if !enabled_ids.is_empty() {
-        all_tools.extend(ToolDefinition::skill_tools(&enabled_ids));
+        all_tools.extend(crate::engine::tools::skill_tools(&enabled_ids));
     }
     if !enabled_ids.contains(&"telegram".into()) {
         if let Ok(tg_cfg) = telegram::load_telegram_config(app_handle) {
             if !tg_cfg.bot_token.is_empty() {
-                all_tools.push(ToolDefinition::telegram_send());
-                all_tools.push(ToolDefinition::telegram_read());
+                all_tools.push(crate::engine::tools::telegram::telegram_send());
+                all_tools.push(crate::engine::tools::telegram::telegram_read());
             }
         }
     }
 
     // Add tools from connected MCP servers
-    let mcp_tools = ToolDefinition::mcp_tools(app_handle);
+    let mcp_tools = crate::engine::tools::mcp_tools(app_handle);
     if !mcp_tools.is_empty() {
         info!("[engine] Adding {} MCP tools for task", mcp_tools.len());
         all_tools.extend(mcp_tools);

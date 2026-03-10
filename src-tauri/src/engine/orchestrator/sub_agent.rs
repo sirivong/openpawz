@@ -208,18 +208,18 @@ When told to install a package:
     let full_system_prompt = sys_parts.join("\n\n---\n\n");
 
     // Build tools: builtins + skills + worker tools
-    let mut all_tools = ToolDefinition::builtins();
+    let mut all_tools = crate::engine::tools::builtin_tools();
     let enabled_ids: Vec<String> = skills::builtin_skills()
         .iter()
         .filter(|s| state.store.is_skill_enabled(&s.id).unwrap_or(false))
         .map(|s| s.id.clone())
         .collect();
     if !enabled_ids.is_empty() {
-        all_tools.extend(ToolDefinition::skill_tools(&enabled_ids));
+        all_tools.extend(crate::engine::tools::skill_tools(&enabled_ids));
     }
     all_tools.extend(worker_tools());
     // Add tools from connected MCP servers
-    all_tools.extend(ToolDefinition::mcp_tools(app_handle));
+    all_tools.extend(crate::engine::tools::mcp_tools(app_handle));
 
     // Apply per-agent tool capabilities filter
     if !agent_capabilities.is_empty() {

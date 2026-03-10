@@ -107,7 +107,7 @@ pub async fn delegate_to_worker(
     // the worker bypasses. Shell commands must go through the main agent loop.
     let mut worker_tools: Vec<ToolDefinition> = Vec::new();
     worker_tools.extend(crate::engine::tools::fetch::definitions());
-    worker_tools.extend(ToolDefinition::mcp_tools(app_handle));
+    worker_tools.extend(crate::engine::tools::mcp_tools(app_handle));
     worker_tools.extend(crate::engine::tools::n8n::definitions());
 
     if worker_tools.is_empty() {

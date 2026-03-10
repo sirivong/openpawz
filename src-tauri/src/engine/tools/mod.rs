@@ -99,71 +99,69 @@ pub fn plan_tool_definition() -> ToolDefinition {
     }
 }
 
-// ── ToolDefinition helpers (keep backward-compatible API for all callers) ───
+// ── ToolDefinition helpers (free functions — types now live in openpawz-core) ──
 
-impl ToolDefinition {
-    /// Return the default set of built-in tools.
-    pub fn builtins() -> Vec<Self> {
-        let mut tools = Vec::new();
-        tools.extend(exec::definitions());
-        tools.extend(fetch::definitions());
-        tools.extend(filesystem::definitions());
-        tools.extend(soul::definitions());
-        tools.extend(memory::definitions());
-        tools.extend(web::definitions());
-        tools.extend(tasks::definitions());
-        tools.extend(agents::definitions());
-        tools.extend(skills_tools::definitions());
-        tools.extend(skill_output::definitions());
-        tools.extend(skill_storage::definitions());
-        tools.extend(canvas::definitions());
-        tools.extend(canvas_dashboards::definitions());
-        tools.extend(canvas_templates::definitions());
-        tools.extend(agent_comms::definitions());
-        tools.extend(squads::definitions());
-        tools.extend(request_tools::definitions());
-        tools.extend(n8n::definitions());
-        tools.push(plan_tool_definition());
-        tools
+/// Return the default set of built-in tools.
+pub fn builtin_tools() -> Vec<ToolDefinition> {
+    let mut tools = Vec::new();
+    tools.extend(exec::definitions());
+    tools.extend(fetch::definitions());
+    tools.extend(filesystem::definitions());
+    tools.extend(soul::definitions());
+    tools.extend(memory::definitions());
+    tools.extend(web::definitions());
+    tools.extend(tasks::definitions());
+    tools.extend(agents::definitions());
+    tools.extend(skills_tools::definitions());
+    tools.extend(skill_output::definitions());
+    tools.extend(skill_storage::definitions());
+    tools.extend(canvas::definitions());
+    tools.extend(canvas_dashboards::definitions());
+    tools.extend(canvas_templates::definitions());
+    tools.extend(agent_comms::definitions());
+    tools.extend(squads::definitions());
+    tools.extend(request_tools::definitions());
+    tools.extend(n8n::definitions());
+    tools.push(plan_tool_definition());
+    tools
+}
+
+/// Return tools exposed by all connected MCP servers.
+/// Call this after builtin_tools + skill_tools to merge dynamic tools.
+pub fn mcp_tools(app_handle: &tauri::AppHandle) -> Vec<ToolDefinition> {
+    if let Some(state) = app_handle.try_state::<EngineState>() {
+        // Use try_lock to avoid blocking — if locked, return empty
+        // (tools will be available on next request)
+        match state.mcp_registry.try_lock() {
+            Ok(reg) => reg.all_tool_definitions(),
+            Err(_) => vec![],
+        }
+    } else {
+        vec![]
     }
+}
 
-    /// Return tools exposed by all connected MCP servers.
-    /// Call this after builtins + skill_tools to merge dynamic tools.
-    pub fn mcp_tools(app_handle: &tauri::AppHandle) -> Vec<Self> {
-        if let Some(state) = app_handle.try_state::<EngineState>() {
-            // Use try_lock to avoid blocking — if locked, return empty
-            // (tools will be available on next request)
-            match state.mcp_registry.try_lock() {
-                Ok(reg) => reg.all_tool_definitions(),
-                Err(_) => vec![],
-            }
-        } else {
-            vec![]
+/// Return tools for enabled skills.
+pub fn skill_tools(enabled_skill_ids: &[String]) -> Vec<ToolDefinition> {
+    let mut tools = Vec::new();
+    for id in enabled_skill_ids {
+        match id.as_str() {
+            "telegram" => tools.extend(telegram::definitions()),
+            "rest_api" => tools.extend(integrations::definitions_for("rest_api")),
+            "webhook" => tools.extend(integrations::definitions_for("webhook")),
+            "image_gen" => tools.extend(integrations::definitions_for("image_gen")),
+            "discord" => tools.extend(discord::definitions()),
+            "discourse" => tools.extend(discourse::definitions()),
+            "coinbase" => tools.extend(coinbase::definitions()),
+            "solana_dex" => tools.extend(solana::definitions()),
+            "dex" => tools.extend(dex::definitions()),
+            "google_workspace" => tools.extend(google::definitions()),
+            "microsoft_365" => tools.extend(microsoft::definitions()),
+            "connected_services" => tools.extend(service_api::definitions()),
+            _ => {}
         }
     }
-
-    /// Return tools for enabled skills.
-    pub fn skill_tools(enabled_skill_ids: &[String]) -> Vec<Self> {
-        let mut tools = Vec::new();
-        for id in enabled_skill_ids {
-            match id.as_str() {
-                "telegram" => tools.extend(telegram::definitions()),
-                "rest_api" => tools.extend(integrations::definitions_for("rest_api")),
-                "webhook" => tools.extend(integrations::definitions_for("webhook")),
-                "image_gen" => tools.extend(integrations::definitions_for("image_gen")),
-                "discord" => tools.extend(discord::definitions()),
-                "discourse" => tools.extend(discourse::definitions()),
-                "coinbase" => tools.extend(coinbase::definitions()),
-                "solana_dex" => tools.extend(solana::definitions()),
-                "dex" => tools.extend(dex::definitions()),
-                "google_workspace" => tools.extend(google::definitions()),
-                "microsoft_365" => tools.extend(microsoft::definitions()),
-                "connected_services" => tools.extend(service_api::definitions()),
-                _ => {}
-            }
-        }
-        tools
-    }
+    tools
 }
 
 // ── Main executor ──────────────────────────────────────────────────────────

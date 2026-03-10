@@ -153,7 +153,7 @@ pub fn refresh_tool_rag(app_handle: &tauri::AppHandle, tools: &mut Vec<ToolDefin
     info!("[tool-rag] Will try to inject: {:?}", new_names);
 
     // Build the full tool registry to find the definitions
-    let mut all_defs = ToolDefinition::builtins();
+    let mut all_defs = crate::engine::tools::builtin_tools();
     let enabled_ids: Vec<String> = crate::engine::skills::builtin_skills()
         .iter()
         .filter(|s| {
@@ -165,7 +165,7 @@ pub fn refresh_tool_rag(app_handle: &tauri::AppHandle, tools: &mut Vec<ToolDefin
         })
         .map(|s| s.id.clone())
         .collect();
-    all_defs.extend(ToolDefinition::skill_tools(&enabled_ids));
+    all_defs.extend(crate::engine::tools::skill_tools(&enabled_ids));
 
     let mut added = 0;
     for def in all_defs {

@@ -47,7 +47,7 @@ pub fn build_chat_tools(
     }
 
     // ── Build the full tool registry (same as before) ──────────────────
-    let mut all_tools = ToolDefinition::builtins();
+    let mut all_tools = crate::engine::tools::builtin_tools();
 
     let enabled_ids: Vec<String> = skills::builtin_skills()
         .iter()
@@ -56,7 +56,7 @@ pub fn build_chat_tools(
         .collect();
     if !enabled_ids.is_empty() {
         info!("[engine] Skills enabled: {:?}", enabled_ids);
-        all_tools.extend(ToolDefinition::skill_tools(&enabled_ids));
+        all_tools.extend(crate::engine::tools::skill_tools(&enabled_ids));
     }
 
     // Auto-add telegram tools when bridge configured but skill not enabled
@@ -64,14 +64,14 @@ pub fn build_chat_tools(
         if let Ok(tg_cfg) = crate::engine::telegram::load_telegram_config(app_handle) {
             if !tg_cfg.bot_token.is_empty() {
                 info!("[engine] Auto-adding telegram tools (bridge configured)");
-                all_tools.push(ToolDefinition::telegram_send());
-                all_tools.push(ToolDefinition::telegram_read());
+                all_tools.push(crate::engine::tools::telegram::telegram_send());
+                all_tools.push(crate::engine::tools::telegram::telegram_read());
             }
         }
     }
 
     // Add MCP tools (always included — they're external servers)
-    let mcp_tools = ToolDefinition::mcp_tools(app_handle);
+    let mcp_tools = crate::engine::tools::mcp_tools(app_handle);
     if !mcp_tools.is_empty() {
         info!("[engine] Adding {} MCP tools", mcp_tools.len());
         all_tools.extend(mcp_tools);

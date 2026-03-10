@@ -26,30 +26,34 @@ use std::sync::Arc;
 mod agent_files;
 mod agent_messages;
 mod canvas;
+pub mod community_skills;
 mod config;
 mod dashboard_tabs;
 mod dashboard_windows;
 mod dashboards;
-pub(crate) mod embedding;
-pub(crate) mod engram;
+pub mod embedding;
+pub mod engram;
 mod flows;
 mod memories;
 mod messages;
 mod positions;
 mod projects;
-pub(crate) mod schema;
+pub mod schema;
 #[allow(clippy::module_inception)]
 mod sessions;
 mod skill_outputs;
 mod skill_storage;
+mod skill_vault;
 mod squads;
 mod tasks;
-pub(crate) mod telemetry;
+pub mod telemetry;
 mod templates;
 mod trades;
 
 // ── Re-exports (preserve crate::engine::sessions::* API) ─────────────────────
 
+pub use community_skills::get_community_skill_instructions;
+pub use community_skills::CommunitySkill;
 pub use embedding::f32_vec_to_bytes;
 pub use skill_outputs::SkillOutput;
 pub use skill_storage::SkillStorageItem;

@@ -265,18 +265,18 @@ You are the **Boss Agent** orchestrating project "{}".
     };
 
     // Build tools: builtins + skill tools + orchestrator boss tools
-    let mut all_tools = ToolDefinition::builtins();
+    let mut all_tools = crate::engine::tools::builtin_tools();
     let enabled_ids: Vec<String> = skills::builtin_skills()
         .iter()
         .filter(|s| state.store.is_skill_enabled(&s.id).unwrap_or(false))
         .map(|s| s.id.clone())
         .collect();
     if !enabled_ids.is_empty() {
-        all_tools.extend(ToolDefinition::skill_tools(&enabled_ids));
+        all_tools.extend(crate::engine::tools::skill_tools(&enabled_ids));
     }
     all_tools.extend(boss_tools());
     // Add tools from connected MCP servers
-    all_tools.extend(ToolDefinition::mcp_tools(app_handle));
+    all_tools.extend(crate::engine::tools::mcp_tools(app_handle));
 
     // Create boss session
     let session_id = format!("eng-project-{}-boss", project_id);

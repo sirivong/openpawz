@@ -60,41 +60,38 @@ pub async fn execute(
     }
 }
 
-impl ToolDefinition {
-    pub fn telegram_send() -> Self {
-        ToolDefinition {
-            tool_type: "function".into(),
-            function: FunctionDefinition {
-                name: "telegram_send".into(),
-                description: "Send a proactive message to a Telegram user. The user must have messaged the bot at least once so their chat_id is known.".into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "text": { "type": "string", "description": "The message text to send" },
-                        "username": { "type": "string", "description": "Telegram username (without @) to send to. Optional." },
-                        "chat_id": { "type": "integer", "description": "Numeric Telegram chat ID. Alternative to username." }
-                    },
-                    "required": ["text"]
-                }),
-            },
-        }
+pub fn telegram_send() -> ToolDefinition {
+    ToolDefinition {
+        tool_type: "function".into(),
+        function: FunctionDefinition {
+            name: "telegram_send".into(),
+            description: "Send a proactive message to a Telegram user. The user must have messaged the bot at least once so their chat_id is known.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string", "description": "The message text to send" },
+                    "username": { "type": "string", "description": "Telegram username (without @) to send to. Optional." },
+                    "chat_id": { "type": "integer", "description": "Numeric Telegram chat ID. Alternative to username." }
+                },
+                "required": ["text"]
+            }),
+        },
     }
+}
 
-    pub fn telegram_read() -> Self {
-        ToolDefinition {
-            tool_type: "function".into(),
-            function: FunctionDefinition {
-                name: "telegram_read".into(),
-                description: "Get information about the Telegram bridge status and known users."
-                    .into(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "info": { "type": "string", "enum": ["status", "users"], "description": "What to retrieve: 'status' for bridge health, 'users' for list of known users (default: status)" }
-                    }
-                }),
-            },
-        }
+pub fn telegram_read() -> ToolDefinition {
+    ToolDefinition {
+        tool_type: "function".into(),
+        function: FunctionDefinition {
+            name: "telegram_read".into(),
+            description: "Get information about the Telegram bridge status and known users.".into(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "info": { "type": "string", "enum": ["status", "users"], "description": "What to retrieve: 'status' for bridge health, 'users' for list of known users (default: status)" }
+                }
+            }),
+        },
     }
 }
 

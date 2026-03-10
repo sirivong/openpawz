@@ -396,7 +396,7 @@ pub async fn run_channel_agent(
     //   - memory_store / memory_search: remember things across conversations
     //   - self_info: introspect own config when asked
     let mut tools: Vec<ToolDefinition> = {
-        let mut all_builtins = ToolDefinition::builtins();
+        let mut all_builtins = crate::engine::tools::builtin_tools();
         // Add all discord tools
         all_builtins.extend(crate::engine::tools::discord::definitions());
         let whitelist = [
