@@ -7,12 +7,32 @@ mod commands;
 
 use clap::{Parser, Subcommand};
 
+const BANNER: &str = concat!(
+    "\n",
+    "\x1b[1;38;5;208m   ██████╗ ██████╗ ███████╗███╗   ██╗\x1b[0m\n",
+    "\x1b[1;38;5;208m  ██╔═══██╗██╔══██╗██╔════╝████╗  ██║\x1b[0m\n",
+    "\x1b[1;38;5;209m  ██║   ██║██████╔╝█████╗  ██╔██╗ ██║\x1b[0m\n",
+    "\x1b[1;38;5;209m  ██║   ██║██╔═══╝ ██╔══╝  ██║╚██╗██║\x1b[0m\n",
+    "\x1b[1;38;5;210m  ╚██████╔╝██║     ███████╗██║ ╚████║\x1b[0m\n",
+    "\x1b[1;38;5;210m   ╚═════╝ ╚═╝     ╚══════╝╚═╝  ╚═══╝\x1b[0m\n",
+    "\x1b[1;38;5;215m  ██████╗  █████╗ ██╗    ██╗███████╗\x1b[0m\n",
+    "\x1b[1;38;5;215m  ██╔══██╗██╔══██╗██║    ██║╚══███╔╝\x1b[0m\n",
+    "\x1b[1;38;5;216m  ██████╔╝███████║██║ █╗ ██║  ███╔╝\x1b[0m\n",
+    "\x1b[1;38;5;216m  ██╔═══╝ ██╔══██║██║███╗██║ ███╔╝\x1b[0m\n",
+    "\x1b[1;38;5;217m  ██║     ██║  ██║╚███╔███╔╝███████╗\x1b[0m\n",
+    "\x1b[1;38;5;217m  ╚═╝     ╚═╝  ╚═╝ ╚══╝╚══╝ ╚══════╝\x1b[0m\n",
+    "\n",
+    "\x1b[38;5;240m  ──────────────────────────────────────\x1b[0m\n",
+    "  \x1b[38;5;250m🐾 Multi-Agent AI from the Terminal\x1b[0m\n"
+);
+
 #[derive(Parser)]
 #[command(
     name = "openpawz",
-    about = "OpenPawz CLI — Multi-agent AI from the terminal",
+    about = "Multi-agent AI from the terminal",
     version,
-    arg_required_else_help = true
+    arg_required_else_help = true,
+    before_help = BANNER
 )]
 struct Cli {
     /// Output format
