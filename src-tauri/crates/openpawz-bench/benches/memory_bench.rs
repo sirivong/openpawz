@@ -599,6 +599,30 @@ criterion_group!(
     bench_semantic_store,
     bench_semantic_search_bm25,
 );
+// ── Content overlap (dedup hot path) ─────────────────────────────────────
+
+fn bench_content_overlap(c: &mut Criterion) {
+    let long_a = MEMORY_CORPUS[..10].join(" ");
+    let long_b = MEMORY_CORPUS[5..15].join(" ");
+    let pairs: Vec<(&str, &str, &str)> = vec![
+        ("identical", MEMORY_CORPUS[0], MEMORY_CORPUS[0]),
+        ("similar", MEMORY_CORPUS[0], MEMORY_CORPUS[4]),
+        ("disjoint", MEMORY_CORPUS[1], MEMORY_CORPUS[8]),
+        ("long", &long_a, &long_b),
+    ];
+    let mut group = c.benchmark_group("memory/content_overlap");
+    for (label, a, b) in &pairs {
+        group.bench_with_input(
+            BenchmarkId::new("pair", *label),
+            &(*a, *b),
+            |bench, (a, b)| {
+                bench.iter(|| black_box(memory::content_overlap(black_box(a), black_box(b))));
+            },
+        );
+    }
+    group.finish();
+}
+
 criterion_group!(
     advanced_ops,
     bench_spreading_activation,
@@ -606,10 +630,12 @@ criterion_group!(
     bench_extract_facts,
     bench_gc_candidates,
 );
+criterion_group!(dedup_ops, bench_content_overlap);
 criterion_main!(
     store_ops,
     graph_ops,
     episodic_ops,
     semantic_ops,
-    advanced_ops
+    advanced_ops,
+    dedup_ops
 );

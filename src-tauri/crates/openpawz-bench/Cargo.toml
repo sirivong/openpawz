@@ -48,3 +48,11 @@ harness = false
 [[bench]]
 name = "reasoning_bench"
 harness = false
+
+[[bench]]
+name = "platform_bench"
+harness = false
+
+[[bench]]
+name = "cognitive_bench"
+harness = false

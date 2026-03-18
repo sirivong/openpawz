@@ -77,10 +77,12 @@ fn bench_affect_to_emotional_context(c: &mut Criterion) {
 
 fn bench_model_price(c: &mut Criterion) {
     let models = &[
-        "gpt-4o",
-        "claude-sonnet-4-20250514",
-        "gemini-2.0-flash",
-        "deepseek-chat",
+        "gpt-5.3",
+        "claude-opus-4-6",
+        "claude-sonnet-4",
+        "gemini-3.1-pro",
+        "gemini-3-flash",
+        "deepseek-reasoner",
         "unknown-model-xyz",
     ];
     let mut group = c.benchmark_group("pricing/model_price");
@@ -96,7 +98,7 @@ fn bench_estimate_cost(c: &mut Criterion) {
     c.bench_function("pricing/estimate_cost_usd", |b| {
         b.iter(|| {
             black_box(pricing::estimate_cost_usd(
-                black_box("gpt-4o"),
+                black_box("gpt-5.3"),
                 black_box(2000),
                 black_box(500),
                 black_box(1500),

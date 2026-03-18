@@ -114,7 +114,7 @@ fn bench_scc_issue(c: &mut Criterion) {
     ];
     c.bench_function("scc/issue_certificate", |b| {
         b.iter(|| {
-            black_box(scc::issue_certificate(&store, "gpt-4o", black_box(&capabilities)).unwrap());
+            black_box(scc::issue_certificate(&store, "gpt-5.3", black_box(&capabilities)).unwrap());
         });
     });
 }

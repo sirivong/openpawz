@@ -111,6 +111,14 @@ pub fn random_vec(dims: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Convert f32 vector to bytes (little-endian) for SQLite embedding storage.
+pub fn random_vec_bytes(dims: usize) -> Vec<u8> {
+    random_vec(dims)
+        .iter()
+        .flat_map(|f| f.to_le_bytes())
+        .collect()
+}
+
 /// Corpus of realistic memory content for search benchmarks.
 pub const MEMORY_CORPUS: &[&str] = &[
     "deployment target AWS us-east-1 with auto-scaling enabled",

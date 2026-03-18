@@ -59,7 +59,7 @@ fn bench_detect_pii(c: &mut Criterion) {
 fn bench_encrypt_decrypt(c: &mut Criterion) {
     // Use a fixed 32-byte key for benchmarking (not fetched from env).
     let key: [u8; 32] = [0xAB; 32];
-    let plaintext = "The user's API key is sk-1234567890abcdef and they prefer model gpt-4o for code generation tasks.";
+    let plaintext = "The user's API key is sk-1234567890abcdef and they prefer model gpt-5.3 for code generation tasks.";
 
     c.bench_function("encryption/encrypt", |b| {
         b.iter(|| {
@@ -90,7 +90,7 @@ fn bench_detect_constraints(c: &mut Criterion) {
             BenchmarkId::new("provider", *label),
             provider,
             |b, provider| {
-                b.iter(|| black_box(constrained::detect_constraints(*provider, "gpt-4o")));
+                b.iter(|| black_box(constrained::detect_constraints(*provider, "gpt-5.3")));
             },
         );
     }
@@ -137,7 +137,7 @@ fn bench_apply_openai_strict(c: &mut Criterion) {
             }
         }
     });
-    let config = constrained::detect_constraints(ProviderKind::OpenAI, "gpt-4o");
+    let config = constrained::detect_constraints(ProviderKind::OpenAI, "gpt-5.3");
     c.bench_function("constrained/apply_openai_strict", |b| {
         b.iter(|| {
             let mut tools = vec![tool_json.clone(); 5];

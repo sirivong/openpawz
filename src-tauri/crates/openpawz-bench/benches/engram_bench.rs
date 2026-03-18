@@ -25,6 +25,7 @@ const DIMS: usize = 384;
 
 fn bench_hnsw_insert(c: &mut Criterion) {
     let mut group = c.benchmark_group("hnsw/insert");
+    group.sample_size(10); // Large inserts are slow; reduce samples for stable CI
     for &n in &[100, 500, 2000] {
         group.bench_with_input(BenchmarkId::from_parameter(n), &n, |b, &n| {
             b.iter_with_setup(
@@ -549,9 +550,10 @@ fn bench_gate_decision(c: &mut Criterion) {
 
 fn bench_resolve_model_caps(c: &mut Criterion) {
     let models = &[
-        ("gpt4o", "gpt-4o"),
-        ("claude", "claude-3.5-sonnet"),
-        ("llama", "llama3.1:70b"),
+        ("gpt5", "gpt-5.3"),
+        ("claude", "claude-opus-4-6"),
+        ("gemini", "gemini-3.1-pro"),
+        ("llama", "llama-4:70b"),
         ("unknown", "custom-finetune-v3"),
     ];
     let mut group = c.benchmark_group("model_caps/resolve");
@@ -567,7 +569,7 @@ fn bench_normalize_model_name(c: &mut Criterion) {
     c.bench_function("model_caps/normalize_name", |b| {
         b.iter(|| {
             black_box(model_caps::normalize_model_name(black_box(
-                "GPT-4o-2024-05-13",
+                "GPT-5.3-2026-01-20",
             )))
         });
     });
