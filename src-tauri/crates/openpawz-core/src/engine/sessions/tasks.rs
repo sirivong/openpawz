@@ -62,7 +62,7 @@ impl SessionStore {
             "SELECT id, title, description, status, priority, assigned_agent, session_id,
                     cron_schedule, cron_enabled, last_run_at, next_run_at, created_at, updated_at, model,
                     event_trigger, persistent
-             FROM tasks ORDER BY updated_at DESC"
+             FROM tasks ORDER BY updated_at DESC LIMIT 10000"
         )?;
 
         let mut tasks: Vec<Task> = stmt

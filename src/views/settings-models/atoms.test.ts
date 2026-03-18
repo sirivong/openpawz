@@ -119,7 +119,7 @@ describe('TIER_LABELS', () => {
   });
 
   it('has labels for openai models', () => {
-    expect(TIER_LABELS.openai['gpt-4o']).toContain('Best value');
+    expect(TIER_LABELS.openai['gpt-5.1']).toContain('Flagship');
   });
 });
 

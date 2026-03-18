@@ -4574,7 +4574,6 @@ dependencies = [
  "cbc",
  "chrono",
  "chrono-tz",
- "criterion",
  "dirs",
  "ed25519-dalek",
  "futures",
@@ -4628,6 +4627,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "openpawz-bench"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "criterion",
+ "openpawz-core",
+ "rusqlite",
+ "serde_json",
+]
+
+[[package]]
 name = "openpawz-cli"
 version = "0.1.0"
 dependencies = [
@@ -4637,6 +4647,7 @@ dependencies = [
  "env_logger",
  "log",
  "openpawz-core",
+ "rusqlite",
  "serde",
  "serde_json",
  "tokio",

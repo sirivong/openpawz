@@ -101,7 +101,7 @@ pub async fn execute_task(
             cfg.model_routing.clone(),
             cfg.default_model
                 .clone()
-                .unwrap_or_else(|| "gpt-4o".to_string()),
+                .unwrap_or_else(|| "gpt-5.1".to_string()),
         )
     };
 

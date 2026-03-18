@@ -45,7 +45,7 @@ pub async fn engine_chat_send(
                     let cfg = state.config.lock();
                     cfg.default_model
                         .clone()
-                        .unwrap_or_else(|| "gpt-4o".to_string())
+                        .unwrap_or_else(|| "gpt-5.1".to_string())
                 } else {
                     raw
                 };
@@ -65,7 +65,7 @@ pub async fn engine_chat_send(
                 let cfg = state.config.lock();
                 cfg.default_model
                     .clone()
-                    .unwrap_or_else(|| "gpt-4o".to_string())
+                    .unwrap_or_else(|| "gpt-5.1".to_string())
             } else {
                 raw
             };
@@ -103,7 +103,7 @@ pub async fn engine_chat_send(
                 let m = if raw.is_empty() || raw.eq_ignore_ascii_case("default") {
                     cfg.default_model
                         .clone()
-                        .unwrap_or_else(|| "gpt-4o".to_string())
+                        .unwrap_or_else(|| "gpt-5.1".to_string())
                 } else {
                     normalize_model_name(&raw).to_string()
                 };
@@ -149,7 +149,7 @@ pub async fn engine_chat_send(
         let base_model = if raw_model.is_empty() || raw_model.eq_ignore_ascii_case("default") {
             cfg.default_model
                 .clone()
-                .unwrap_or_else(|| "gpt-4o".to_string())
+                .unwrap_or_else(|| "gpt-5.1".to_string())
         } else {
             raw_model
         };
@@ -1084,7 +1084,7 @@ pub async fn engine_session_compact(
         let model = cfg
             .default_model
             .clone()
-            .unwrap_or_else(|| "gpt-4o".to_string());
+            .unwrap_or_else(|| "gpt-5.1".to_string());
         let provider = cfg
             .default_provider
             .as_ref()

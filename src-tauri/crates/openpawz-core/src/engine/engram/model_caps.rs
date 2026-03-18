@@ -397,6 +397,65 @@ static REGISTRY: LazyLock<Vec<ModelEntry>> = LazyLock::new(|| {
                 provider: ModelProvider::OpenAI,
             },
         },
+        // ── GPT-5.x family (current flagship, Responses API) ─────
+        ModelEntry {
+            prefix: "gpt-5",
+            caps: ModelCapabilities {
+                context_window: 1_048_576,
+                max_output_tokens: 100_000,
+                supports_tools: true,
+                supports_vision: true,
+                supports_extended_thinking: true,
+                supports_streaming: true,
+                tokenizer: TokenizerType::O200kBase,
+                rate_limit_rpm: Some(100),
+                provider: ModelProvider::OpenAI,
+            },
+        },
+        // ── GPT-4.1 family (1M context) ────────────────────────
+        ModelEntry {
+            prefix: "gpt-4.1-nano",
+            caps: ModelCapabilities {
+                context_window: 1_048_576,
+                max_output_tokens: 32_768,
+                supports_tools: true,
+                supports_vision: true,
+                supports_extended_thinking: false,
+                supports_streaming: true,
+                tokenizer: TokenizerType::O200kBase,
+                rate_limit_rpm: Some(1000),
+                provider: ModelProvider::OpenAI,
+            },
+        },
+        ModelEntry {
+            prefix: "gpt-4.1-mini",
+            caps: ModelCapabilities {
+                context_window: 1_048_576,
+                max_output_tokens: 32_768,
+                supports_tools: true,
+                supports_vision: true,
+                supports_extended_thinking: false,
+                supports_streaming: true,
+                tokenizer: TokenizerType::O200kBase,
+                rate_limit_rpm: Some(500),
+                provider: ModelProvider::OpenAI,
+            },
+        },
+        ModelEntry {
+            prefix: "gpt-4.1",
+            caps: ModelCapabilities {
+                context_window: 1_048_576,
+                max_output_tokens: 32_768,
+                supports_tools: true,
+                supports_vision: true,
+                supports_extended_thinking: false,
+                supports_streaming: true,
+                tokenizer: TokenizerType::O200kBase,
+                rate_limit_rpm: Some(500),
+                provider: ModelProvider::OpenAI,
+            },
+        },
+        // ── GPT-4o family (legacy, 128K context) ───────────────
         ModelEntry {
             prefix: "gpt-4o-mini",
             caps: ModelCapabilities {

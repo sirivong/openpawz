@@ -45,6 +45,7 @@ const DEFAULT_CONTEXT_SIZES: Record<string, number> = {
   'gemini-2.0-flash': 1_048_576,
   'gemini-2.0-pro': 1_048_576,
   // OpenAI
+  'gpt-5.1': 1_048_576,
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
   'gpt-4-turbo': 128_000,

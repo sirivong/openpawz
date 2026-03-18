@@ -556,6 +556,119 @@ openpawz project delete <project-id>
 
 ---
 
+### `engram` — Deep Memory & Graph Exploration
+
+Search and explore the Engram memory subsystem — episodic, semantic, and procedural memories with graph relationships.
+
+```bash
+# Episodic BM25 search
+openpawz engram search "deployment strategy" --limit 20
+
+# Semantic BM25 search
+openpawz engram semantic "how to configure OAuth" --limit 10
+
+# Procedural pattern search
+openpawz engram procedural "docker%" --limit 5
+
+# Memory statistics
+openpawz engram stats
+```
+
+```
+  Episodic:   142 memories
+  Semantic:    58 memories
+  Procedural:  23 memories
+  Edges:      310 relationships
+```
+
+```bash
+# List graph edges for a memory
+openpawz engram edges <memory-id> --limit 50
+
+# Run spreading activation from a node
+openpawz engram activate <memory-id> --depth 3 --decay 0.5 --top-k 20
+
+# List garbage collection candidates
+openpawz engram gc-candidates --limit 100
+```
+
+---
+
+### `metrics` — Usage Metrics & Cost Tracking
+
+Track token usage, cost, and model breakdown across sessions.
+
+```bash
+# Today's usage summary
+openpawz metrics today
+```
+
+```
+  Tokens (in/out):  12.4K / 8.2K
+  Cost:             $0.0341
+  Sessions:         7
+```
+
+```bash
+# Daily breakdown for last N days
+openpawz metrics daily --days 7
+
+# Date range
+openpawz metrics range --from yyyy-mm-dd --to yyyy-mm-dd
+
+# Model-level breakdown
+openpawz metrics models
+```
+
+```
+  MODEL                   TOKENS IN   TOKENS OUT    COST
+  ─────────────────────────────────────────────────────────
+  claude-3.5-sonnet         45.2K       32.1K      $0.1247
+  gpt-5.1                    12.8K        8.4K      $0.0382
+  llama-3.1-70b              8.1K        5.2K      $0.0000
+```
+
+```bash
+# Per-session usage
+openpawz metrics session --limit 10
+
+# Purge old metrics
+openpawz metrics purge --before yyyy-mm-dd
+```
+
+---
+
+### `providers` — Integration Provider Status
+
+Check OAuth and API connection status across configured providers.
+
+```bash
+# List all registered providers
+openpawz providers list
+```
+
+```
+  PROVIDER        STATUS    BASE URL
+  ────────────────────────────────────────────────────
+  anthropic       ✓ ready   https://api.anthropic.com
+  openai          ✓ ready   https://api.openai.com
+  ollama          ✓ ready   http://localhost:11434
+  google          ✗ —       https://generativelanguage.googleapis.com
+```
+
+```bash
+# Show only ready providers
+openpawz providers ready
+
+# Check a specific provider
+openpawz providers check anthropic
+
+# Count registered providers
+openpawz providers count
+```
+
+---
+
 ### `doctor` — Engine Health Check
 
 Comprehensive diagnostic check for CI, monitoring, and troubleshooting. Returns exit code 1 if any errors are detected.
@@ -582,6 +695,105 @@ openpawz doctor --output quiet || exit 1
 
 # JSON for monitoring dashboards
 openpawz doctor --output json
+```
+
+---
+
+### `bench` — Performance Benchmarks
+
+Built-in timing of core engine operations for performance testing and regression detection.
+
+#### Quick benchmark (built-in)
+
+```bash
+openpawz bench quick
+openpawz bench quick --iterations 500
+```
+
+```
+  OPERATION                             ITERS    TOTAL (µs)     AVG (µs)
+  -------------------------------------------------------------------------
+  session_create                          100         4320           43
+  message_add                             100         3890           38
+  memory_store                            100         5210           52
+  memory_search_keyword                   100         1820           18
+  audit_append                            100         8740           87
+  audit_verify_chain (100 entries)          1          920          920
+  task_create                             100         4150           41
+  agent_file_set                          100         3680           36
+  injection_scan                          100          540            5
+  pii_detection                           100          310            3
+  scc_issue_certificate                   100         9200           92
+  pricing_estimate_cost                   100           80            0
+```
+
+Uses an isolated in-memory database — safe to run anytime without affecting production data.
+
+#### Full Criterion suite
+
+The `openpawz-bench` crate contains 6 Criterion harnesses covering 100+ benchmarks across the entire engine:
+
+| Target | Coverage |
+|--------|----------|
+| `session_bench` | Session CRUD, messages, tasks, agent files |
+| `memory_bench` | Store, keyword/BM25 search, list, graph operations, procedural memory |
+| `engram_bench` | HNSW insert/search, reranking (RRF/MMR), hybrid search, abstraction tree, tokenizer, sensory buffer, working memory, emotional affect |
+| `audit_bench` | Append, verify chain (100/1K/5K), query, stats, SCC certificates |
+| `security_bench` | Injection scan (1KB–100KB), PII detection, encryption/decryption, constrained decoding |
+| `reasoning_bench` | Affect scoring, encoding strength, congruent boost, pricing, task complexity, tool metadata |
+
+```bash
+# Run all 6 bench suites with HTML reports
+openpawz bench full
+
+# Run a specific bench target
+openpawz bench full --bench engram_bench
+
+# Filter to a specific group within a target
+openpawz bench full --bench engram_bench hnsw
+openpawz bench full --bench audit_bench scc
+```
+
+Runs the Criterion benchmark suite (`cargo bench -p openpawz-bench`) which produces statistical analysis and HTML reports in `target/criterion/`.
+
+#### Generate a report
+
+Parse Criterion's saved results into a clean Markdown report:
+
+```bash
+# Generate from existing results
+openpawz bench report
+
+# Custom output path
+openpawz bench report -f perf-report.md
+
+# Run benchmarks first, then generate report
+openpawz bench report --run-first
+
+# Run a specific suite, then report
+openpawz bench report --run-first --bench session_bench
+
+# Machine-readable JSON output
+openpawz bench report --output json
+```
+
+The report includes a summary table, per-category details (mean/median/std dev), and top-10 slowest/fastest operations. See [docs/benchmarks.md](benchmarks.md) for the full benchmark guide.
+
+#### Running benchmarks directly with cargo
+
+```bash
+cd src-tauri
+
+# All benchmarks from the dedicated crate
+cargo bench -p openpawz-bench
+
+# Specific target
+cargo bench -p openpawz-bench --bench engram_bench
+cargo bench -p openpawz-bench --bench security_bench
+
+# Filter to specific group
+cargo bench -p openpawz-bench --bench engram_bench -- hnsw
+cargo bench -p openpawz-bench --bench audit_bench -- scc
 ```
 
 ---
@@ -666,6 +878,13 @@ openpawz project add-agent --project "$PID" --agent reviewer --specialty securit
 
 ```bash
 openpawz doctor --output quiet || { echo "Engine unhealthy"; exit 1; }
+```
+
+### Performance regression check
+
+```bash
+# Quick timing in JSON for automated tracking
+openpawz bench quick --iterations 200 --output json > bench-results.json
 ```
 
 ## Data Location

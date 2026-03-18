@@ -85,7 +85,7 @@ pub(crate) async fn run_sub_agent(
         let default_model = cfg
             .default_model
             .clone()
-            .unwrap_or_else(|| "gpt-4o".to_string());
+            .unwrap_or_else(|| "gpt-5.1".to_string());
 
         // Look up this agent in the project to get specialty and per-agent model override
         let agent_entry = state

@@ -48,7 +48,7 @@ pub fn run(store: &SessionStore) -> Result<(), String> {
 
     let (provider_id, provider_kind, default_model, needs_key) = match choice {
         "1" => ("anthropic", "Anthropic", "claude-sonnet-4-20250514", true),
-        "2" => ("openai", "OpenAI", "gpt-4o", true),
+        "2" => ("openai", "OpenAI", "gpt-5.1", true),
         "3" => ("google", "Google", "gemini-2.0-flash", true),
         "4" => ("ollama", "Ollama", "llama3.2", false),
         "5" => (

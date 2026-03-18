@@ -1,9 +1,13 @@
 pub mod agent;
 pub mod audit;
+pub mod bench;
 pub mod config;
 pub mod doctor;
+pub mod engram;
 pub mod memory;
+pub mod metrics;
 pub mod project;
+pub mod providers;
 pub mod session;
 pub mod setup;
 pub mod status;

@@ -263,7 +263,10 @@ async fn run_swarm_turn(
     let (provider_config, model) = {
         let agent_model = state.store.get_agent_model(recipient_id);
         let cfg = state.config.lock();
-        let default_model = cfg.default_model.clone().unwrap_or_else(|| "gpt-4o".into());
+        let default_model = cfg
+            .default_model
+            .clone()
+            .unwrap_or_else(|| "gpt-5.1".into());
         let model = if let Some(ref am) = agent_model {
             // Agent has an explicit model override in the DB — honour it
             normalize_model_name(am).to_string()

@@ -151,7 +151,7 @@ impl OpenAiProvider {
                     .nth(1)
                     .and_then(|v| v.split('&').next())
                     .unwrap_or("2025-03-01-preview");
-                let model = config.default_model.as_deref().unwrap_or("gpt-4o");
+                let model = config.default_model.as_deref().unwrap_or("gpt-5.1");
                 base_url = format!(
                     "{}/openai/deployments/{}/chat/completions?api-version={}",
                     host, model, api_version

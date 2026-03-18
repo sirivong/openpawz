@@ -92,10 +92,30 @@ enum Commands {
         #[command(subcommand)]
         action: commands::project::ProjectAction,
     },
+    /// Deep memory search & graph exploration (episodic, semantic, procedural)
+    Engram {
+        #[command(subcommand)]
+        action: commands::engram::EngramAction,
+    },
+    /// Usage metrics & cost tracking (tokens, cost, model breakdown)
+    Metrics {
+        #[command(subcommand)]
+        action: commands::metrics::MetricsAction,
+    },
+    /// Integration provider status (OAuth, API connections)
+    Providers {
+        #[command(subcommand)]
+        action: commands::providers::ProvidersAction,
+    },
     /// Engine status and diagnostics
     Status,
     /// Comprehensive health check
     Doctor,
+    /// Performance benchmarks (quick timing or full Criterion suite)
+    Bench {
+        #[command(subcommand)]
+        action: commands::bench::BenchAction,
+    },
     /// Initial setup wizard
     Setup,
     /// Generate shell completions
@@ -135,8 +155,12 @@ async fn main() {
         Commands::Task { action } => commands::task::run(&store, action, &cli.output),
         Commands::Audit { action } => commands::audit::run(&store, action, &cli.output),
         Commands::Project { action } => commands::project::run(&store, action, &cli.output),
+        Commands::Engram { action } => commands::engram::run(&store, action, &cli.output),
+        Commands::Metrics { action } => commands::metrics::run(&store, action, &cli.output),
+        Commands::Providers { action } => commands::providers::run(action, &cli.output),
         Commands::Status => commands::status::run(&store, &cli.output),
         Commands::Doctor => commands::doctor::run(&store, &cli.output),
+        Commands::Bench { action } => commands::bench::run(&store, action, &cli.output),
         Commands::Setup => commands::setup::run(&store),
         Commands::Completions { shell } => {
             let mut cmd = Cli::command();

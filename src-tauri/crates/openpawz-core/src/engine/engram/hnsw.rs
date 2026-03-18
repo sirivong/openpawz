@@ -97,18 +97,17 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
     if a.len() != b.len() {
         return 0.0;
     }
-    let (mut dot, mut na, mut nb) = (0.0f64, 0.0f64, 0.0f64);
+    let (mut dot, mut na, mut nb) = (0.0f32, 0.0f32, 0.0f32);
     for (x, y) in a.iter().zip(b.iter()) {
-        let (xf, yf) = (*x as f64, *y as f64);
-        dot += xf * yf;
-        na += xf * xf;
-        nb += yf * yf;
+        dot += x * y;
+        na += x * x;
+        nb += y * y;
     }
-    let denom = na.sqrt() * nb.sqrt();
+    let denom = (na.sqrt() * nb.sqrt()) as f64;
     if denom < 1e-12 {
         0.0
     } else {
-        dot / denom
+        dot as f64 / denom
     }
 }
 
@@ -315,6 +314,11 @@ impl HnswIndex {
             return Vec::new();
         }
 
+        // For small indexes, brute-force is faster than graph traversal.
+        if self.nodes.len() < 2048 {
+            return self.brute_force_search(query, k, threshold);
+        }
+
         let ep = match self.entry_point {
             Some(ep) => ep,
             None => return Vec::new(),
@@ -341,6 +345,27 @@ impl HnswIndex {
     }
 
     // ─── Internal helpers ────────────────────────────────────────────
+
+    /// Linear scan for small indexes — avoids graph traversal overhead.
+    fn brute_force_search(&self, query: &[f32], k: usize, threshold: f64) -> Vec<HnswResult> {
+        let mut scored: Vec<(usize, f64)> = self
+            .nodes
+            .iter()
+            .enumerate()
+            .filter(|(_, n)| !n.vector.is_empty())
+            .map(|(i, n)| (i, cosine_similarity(&n.vector, query)))
+            .filter(|(_, sim)| *sim >= threshold)
+            .collect();
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        scored.truncate(k);
+        scored
+            .into_iter()
+            .map(|(idx, sim)| HnswResult {
+                memory_id: self.nodes[idx].id.clone(),
+                similarity: sim,
+            })
+            .collect()
+    }
 
     /// Greedy search: follow closest neighbor at a single layer.
     fn search_layer_greedy(&self, entry: usize, query: &[f32], layer: usize) -> usize {

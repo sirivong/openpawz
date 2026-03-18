@@ -57,6 +57,10 @@ pub fn model_price(model: &str) -> ModelPrice {
             }
         }
         // OpenAI
+        s if s.starts_with("gpt-5") => ModelPrice {
+            input: 2.00,
+            output: 8.00,
+        },
         s if s.starts_with("gpt-4o-mini")
             || s.starts_with("gpt-4.1-mini")
             || s.starts_with("gpt-4.1-nano") =>

@@ -62,7 +62,10 @@ pub async fn run_channel_agent(
     let (provider_config, model, system_prompt, max_rounds, tool_timeout) = {
         let cfg = engine_state.config.lock();
 
-        let default_model = cfg.default_model.clone().unwrap_or_else(|| "gpt-4o".into());
+        let default_model = cfg
+            .default_model
+            .clone()
+            .unwrap_or_else(|| "gpt-5.1".into());
         // Use "channel" role — falls through to the default model since there's
         // no channel-specific override in model routing. Users can add one in
         // agent_models if they want a specific model for a specific agent.

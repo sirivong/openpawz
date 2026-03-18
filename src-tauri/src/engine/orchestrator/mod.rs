@@ -94,7 +94,7 @@ pub async fn run_project(app_handle: &tauri::AppHandle, project_id: &str) -> Eng
         let default_model = cfg
             .default_model
             .clone()
-            .unwrap_or_else(|| "gpt-4o".to_string());
+            .unwrap_or_else(|| "gpt-5.1".to_string());
 
         let boss_entry = project.agents.iter().find(|a| a.role == "boss");
         let boss_specialty = boss_entry

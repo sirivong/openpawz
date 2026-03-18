@@ -23,10 +23,10 @@ impl SessionStore {
             ],
         )?;
 
-        // Update session stats
+        // Update session stats — increment rather than re-counting
         conn.execute(
             "UPDATE sessions SET
-                message_count = (SELECT COUNT(*) FROM messages WHERE session_id = ?1),
+                message_count = message_count + 1,
                 updated_at = datetime('now')
              WHERE id = ?1",
             params![msg.session_id],

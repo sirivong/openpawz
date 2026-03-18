@@ -469,7 +469,10 @@ impl EngineState {
         // more WM slots, small models avoid over-allocation.
         let wm_budget = {
             let cfg = self.config.lock();
-            let model = cfg.default_model.clone().unwrap_or_else(|| "gpt-4o".into());
+            let model = cfg
+                .default_model
+                .clone()
+                .unwrap_or_else(|| "gpt-5.1".into());
             let caps = crate::engine::engram::model_caps::resolve_model_capabilities(&model);
             let adaptive = caps.context_window / 10;
             adaptive.clamp(2048, 32768)

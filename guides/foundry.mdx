@@ -73,7 +73,7 @@ Chat Modes are named presets that let you instantly switch between different con
 | Quick Chat | `claude-3-haiku` | 0.7 | none | Fast, lightweight responses |
 | Deep Analysis | `claude-opus-4-6` | 0.3 | high | Complex reasoning tasks |
 | Creative Writing | `claude-sonnet-4-6` | 1.0 | medium | Stories, brainstorming |
-| Code Review | `gpt-4o` | 0.2 | low | Precise, technical feedback |
+| Code Review | `gpt-5.1` | 0.2 | low | Precise, technical feedback |
 
 ### Managing modes
 
@@ -90,7 +90,7 @@ Chat Modes are named presets that let you instantly switch between different con
 Chat modes are stored in the **frontend SQLite** database in the `agent_modes` table. This means they persist across sessions and are available immediately on app restart.
 
 :::tip
-Create a "Cost Saver" mode with a cheap model like `claude-3-haiku` or `gpt-4o-mini` for simple tasks, and a "Heavy Lifting" mode with a powerful model for complex work. Switch between them with `/mode` to manage costs.
+Create a "Cost Saver" mode with a cheap model like `claude-3-haiku` or `gpt-4.1-nano` for simple tasks, and a "Heavy Lifting" mode with a powerful model for complex work. Switch between them with `/mode` to manage costs.
 :::
 
 :::info
