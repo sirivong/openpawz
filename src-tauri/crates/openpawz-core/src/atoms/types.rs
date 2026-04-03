@@ -266,6 +266,41 @@ pub enum EngineEvent {
         total_count: usize,
         duration_ms: u64,
     },
+
+    // ── Auth events ─────────────────────────────────────────────────
+
+    /// A tool requires credentials that are not available.
+    /// The UI layer should present the auth URL to the user.
+    /// CLI: print URL + prompt. GUI: show inline auth card.
+    #[serde(rename = "auth_required")]
+    AuthRequired {
+        session_id: String,
+        run_id: String,
+        /// The service that needs authentication (e.g., "slack", "github")
+        service_id: String,
+        /// The tool that triggered the auth requirement
+        tool_name: String,
+        /// Human-readable service name
+        service_name: String,
+        /// OAuth tier for this service
+        tier: String,
+        /// Pre-built authorization URL (if Tier 1 PKCE).
+        /// None for tiers that need different flows.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        auth_url: Option<String>,
+    },
+
+    /// Authentication completed for a service (success or failure).
+    /// Emitted after the user completes the auth flow triggered by AuthRequired.
+    #[serde(rename = "auth_complete")]
+    AuthComplete {
+        session_id: String,
+        run_id: String,
+        service_id: String,
+        success: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 // ── Canvas Components (Agent Canvas) ──────────────────────────────────
@@ -723,7 +758,10 @@ pub(crate) fn default_max_concurrent_runs() -> u32 {
     4
 }
 pub(crate) fn default_context_window_tokens() -> usize {
-    32_000
+    // 200K safe floor for unknown/custom models. Known models (Gemini: 1M,
+    // GPT-4o: 128K, etc.) are resolved via model_caps::resolve_context_window()
+    // at call time. The old 32K caused over-aggressive truncation → 400 errors.
+    200_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

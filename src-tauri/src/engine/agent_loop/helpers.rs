@@ -219,12 +219,19 @@ fn estimate_msg_tokens(m: &Message) -> usize {
 /// user message. Ensures the first non-system message is a User message
 /// (required by Gemini).
 pub fn truncate_mid_loop(app_handle: &tauri::AppHandle, messages: &mut Vec<Message>) {
+    // Detect the model from the messages (system prompt usually contains model info)
+    // but we don't have it here — use the engine config's default_model as a proxy.
     let mid_loop_max = {
         if let Some(state) = app_handle.try_state::<crate::engine::state::EngineState>() {
             let cfg = state.config.lock();
-            cfg.context_window_tokens
+            let user_override = cfg.context_window_tokens;
+            // Resolve per-model context window; fall back to user config or 200K.
+            // 200K is a safe floor for modern models (Gemini: 1M, GPT-4o: 128K, etc.)
+            // and far better than the old 32K hardcoded floor.
+            let model = cfg.default_model.as_deref().unwrap_or("unknown");
+            openpawz_core::engine::engram::model_caps::resolve_context_window(model, user_override)
         } else {
-            32_000
+            200_000
         }
     };
 
@@ -298,8 +305,9 @@ pub fn truncate_mid_loop(app_handle: &tauri::AppHandle, messages: &mut Vec<Messa
         );
 
         // After truncation, orphaned tool_use / tool_result pairs may remain.
-        // Re-sanitize to prevent Anthropic 400 errors.
+        // Re-sanitize, then enforce strict role alternation (required by Gemini).
         sanitize_tool_pairs(messages);
+        normalize_role_alternation(messages);
     } else if let Some(sys) = sys_msg {
         messages.insert(0, sys);
     }
@@ -444,6 +452,98 @@ pub fn sanitize_tool_pairs(messages: &mut Vec<Message>) {
         // Remove in reverse to preserve indices
         for &idx in to_remove.iter().rev() {
             messages.remove(idx);
+        }
+    }
+}
+
+/// Enforce strict role alternation required by providers such as Gemini.
+///
+/// After `sanitize_tool_pairs` removes orphaned tool messages, consecutive
+/// same-role messages can appear in the history.  This pass fixes them:
+///
+/// 1. Drops any leading non-User, non-System messages (first non-system
+///    turn must be User).
+/// 2. Merges consecutive User messages by concatenating their content.
+/// 3. Merges consecutive Assistant messages (without tool_calls) by
+///    concatenating their content.
+///
+/// Tool messages are intentionally left untouched here — they are already
+/// handled by `sanitize_tool_pairs` and are always paired with an Assistant
+/// message, so they do not violate alternation rules on their own.
+pub fn normalize_role_alternation(messages: &mut Vec<Message>) {
+    // ── Pass 1: first non-system message must be User ──────────────────
+    let first_non_sys = messages
+        .iter()
+        .position(|m| m.role != Role::System)
+        .unwrap_or(0);
+
+    let mut i = first_non_sys;
+    while i < messages.len() && messages[i].role != Role::User {
+        warn!(
+            "[engine] Dropping leading non-user message (role={:?}) to satisfy provider alternation",
+            messages[i].role
+        );
+        messages.remove(i);
+    }
+
+    // ── Pass 2: merge consecutive User messages ────────────────────────
+    let mut i = 1;
+    while i < messages.len() {
+        if messages[i].role == Role::User && messages[i - 1].role == Role::User {
+            let extra = match &messages[i].content {
+                MessageContent::Text(t) => t.clone(),
+                MessageContent::Blocks(blocks) => blocks
+                    .iter()
+                    .filter_map(|b| {
+                        if let ContentBlock::Text { text } = b {
+                            Some(text.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            };
+            match &mut messages[i - 1].content {
+                MessageContent::Text(t) => t.push_str(&format!("\n{}", extra)),
+                _ => {}
+            }
+            warn!("[engine] Merged consecutive user messages to satisfy provider alternation");
+            messages.remove(i);
+        } else {
+            i += 1;
+        }
+    }
+
+    // ── Pass 3: merge consecutive Assistant messages (no tool_calls) ──
+    let mut i = 1;
+    while i < messages.len() {
+        let prev_is_bare_assistant = messages[i - 1].role == Role::Assistant
+            && messages[i - 1]
+                .tool_calls
+                .as_ref()
+                .map(|t| t.is_empty())
+                .unwrap_or(true);
+        let curr_is_bare_assistant = messages[i].role == Role::Assistant
+            && messages[i]
+                .tool_calls
+                .as_ref()
+                .map(|t| t.is_empty())
+                .unwrap_or(true);
+
+        if prev_is_bare_assistant && curr_is_bare_assistant {
+            let extra = match &messages[i].content {
+                MessageContent::Text(t) => t.clone(),
+                _ => String::new(),
+            };
+            match &mut messages[i - 1].content {
+                MessageContent::Text(t) => t.push_str(&format!("\n{}", extra)),
+                _ => {}
+            }
+            warn!("[engine] Merged consecutive assistant messages to satisfy provider alternation");
+            messages.remove(i);
+        } else {
+            i += 1;
         }
     }
 }

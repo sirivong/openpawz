@@ -45,7 +45,8 @@ pub async fn engine_chat_send(
                     let cfg = state.config.lock();
                     cfg.default_model
                         .clone()
-                        .unwrap_or_else(|| "gpt-5.1".to_string())
+                        .or_else(|| cfg.providers.first().and_then(|p| p.default_model.clone()))
+                        .unwrap_or_else(|| "gpt-4o".to_string())
                 } else {
                     raw
                 };
@@ -65,7 +66,8 @@ pub async fn engine_chat_send(
                 let cfg = state.config.lock();
                 cfg.default_model
                     .clone()
-                    .unwrap_or_else(|| "gpt-5.1".to_string())
+                    .or_else(|| cfg.providers.first().and_then(|p| p.default_model.clone()))
+                    .unwrap_or_else(|| "gpt-4o".to_string())
             } else {
                 raw
             };
@@ -103,7 +105,8 @@ pub async fn engine_chat_send(
                 let m = if raw.is_empty() || raw.eq_ignore_ascii_case("default") {
                     cfg.default_model
                         .clone()
-                        .unwrap_or_else(|| "gpt-5.1".to_string())
+                        .or_else(|| cfg.providers.first().and_then(|p| p.default_model.clone()))
+                        .unwrap_or_else(|| "gpt-4o".to_string())
                 } else {
                     normalize_model_name(&raw).to_string()
                 };
@@ -147,9 +150,12 @@ pub async fn engine_chat_send(
 
         let raw_model = request.model.clone().unwrap_or_default();
         let base_model = if raw_model.is_empty() || raw_model.eq_ignore_ascii_case("default") {
+            // No model specified — use engine default, then first provider's default_model,
+            // then a sane last-resort (never a placeholder like "gpt-5.1").
             cfg.default_model
                 .clone()
-                .unwrap_or_else(|| "gpt-5.1".to_string())
+                .or_else(|| cfg.providers.first().and_then(|p| p.default_model.clone()))
+                .unwrap_or_else(|| "gpt-4o".to_string())
         } else {
             raw_model
         };
@@ -192,7 +198,25 @@ pub async fn engine_chat_send(
         };
 
         match provider {
-            Some(p) => (p, model),
+            Some(p) => {
+                // If model doesn't match the resolved provider's kind (e.g. "gpt-4o" routed
+                // to a Google provider because the user has no OpenAI), fall back to the
+                // provider's own default_model so the API call uses a valid model name.
+                let corrected_model =
+                    if !user_explicitly_chose_model && !model.is_empty() {
+                        let natural_provider = resolve_provider_for_model(&model, &cfg.providers);
+                        if natural_provider.as_ref().map(|np| np.id != p.id).unwrap_or(true) {
+                            // Model prefix doesn't match our resolved provider — use the
+                            // provider's default_model if available.
+                            p.default_model.clone().unwrap_or(model)
+                        } else {
+                            model
+                        }
+                    } else {
+                        model
+                    };
+                (p, corrected_model)
+            }
             None => {
                 return Err(
                     "No AI provider configured. Go to Settings → Engine to add an API key.".into(),
@@ -309,7 +333,11 @@ pub async fn engine_chat_send(
 
     let context_window_override = {
         let cfg = state.config.lock();
-        cfg.context_window_tokens
+        let user_cfg = cfg.context_window_tokens;
+        // Resolve the actual context window for this model (e.g. Gemini = 1M, GPT-4o = 128K).
+        // Fall back to the user-configured value or 200K — never the old 32K hardcoded floor
+        // which caused constant over-aggressive truncation and broke tool pair ordering.
+        openpawz_core::engine::engram::model_caps::resolve_context_window(&model, user_cfg)
     };
 
     // Load raw conversation history for the ContextBuilder to budget-trim
@@ -474,8 +502,10 @@ pub async fn engine_chat_send(
 
             // Sanitize after reconstruction: context trimming may have
             // dropped assistant messages while keeping their tool results
-            // (or vice versa). This prevents 400 errors from the API.
+            // (or vice versa). Then enforce strict role alternation (Gemini
+            // rejects consecutive same-role messages with a 400 INVALID_ARGUMENT).
             crate::engine::agent_loop::helpers::sanitize_tool_pairs(&mut chat_messages);
+            crate::engine::agent_loop::helpers::normalize_role_alternation(&mut chat_messages);
 
             (ctx.system_prompt, chat_messages, ctx.budget)
         }
@@ -1084,7 +1114,8 @@ pub async fn engine_session_compact(
         let model = cfg
             .default_model
             .clone()
-            .unwrap_or_else(|| "gpt-5.1".to_string());
+            .or_else(|| cfg.providers.first().and_then(|p| p.default_model.clone()))
+            .unwrap_or_else(|| "gpt-4o".to_string());
         let provider = cfg
             .default_provider
             .as_ref()
